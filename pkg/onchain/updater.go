@@ -1,19 +1,15 @@
 package onchain
 
 import (
-	"context"
-	"io/ioutil"
+	"encoding/json"
 	"math/big"
-	"net/http"
 	"time"
 
-	"github.com/diadata-org/decentral-feeder/pkg/models"
-	"github.com/diadata-org/decentral-feeder/pkg/utils"
+	"github.com/diadata-org/decentral-data-feeder/pkg/scraper"
+	"github.com/diadata-org/decentral-data-feeder/pkg/utils"
 	diaOracleV2MultiupdateService "github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
-	"github.com/tidwall/gjson"
 )
 
 var (
@@ -35,42 +31,88 @@ func OracleUpdateExecutor(
 	// deviationPermille int,
 	auth *bind.TransactOpts,
 	contract *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
-	conn *ethclient.Client,
 	chainId int64,
 	// compatibilityMode bool,
-	filtersChannel <-chan []models.FilterPointExtended,
+	source string,
+	dataChannel <-chan []byte,
+	updateDoneChannel chan bool,
 ) {
 
-	for filterPoints := range filtersChannel {
-		timestamp := time.Now().Unix()
-		var keys []string
-		var values []int64
-		for _, fp := range filterPoints {
-			log.Infof(
-				"updater - filterPoint received at %v: %v -- %v -- %v -- %v.",
-				time.Unix(timestamp, 0),
-				fp.Source,
-				fp.Pair.QuoteToken.Symbol,
-				fp.Value,
-				fp.Time,
-			)
-			keys = append(keys, fp.Pair.QuoteToken.Symbol+"/USD")
-			values = append(values, int64(fp.Value*100000000))
-		}
-		err := updateOracleMultiValues(conn, contract, auth, chainId, keys, values, timestamp)
-		if err != nil {
-			log.Warnf("updater - Failed to update Oracle: %v.", err)
-			return
-		}
-	}
+	var keys []string
+	var values []int64
 
+	for {
+
+		select {
+		case data := <-dataChannel:
+
+			switch source {
+			case scraper.TWELVEDATA:
+				var twelvedataResponse scraper.TwelvedataQuote
+				err := json.Unmarshal(data, &twelvedataResponse)
+				if err != nil {
+					log.Error("Unmarshal Twelvedata response: ", err)
+					continue
+				}
+				log.Info("got twelvedata data: ", twelvedataResponse)
+				keys = append(keys, twelvedataResponse.Symbol)
+				values = append(values, int64(twelvedataResponse.Price*1e5))
+
+			case scraper.RANDAMU:
+
+				var randamuResponse scraper.RandamuResponse
+				err := json.Unmarshal(data, &randamuResponse)
+				if err != nil {
+					log.Error("Unmarshal Randamu response: ", err)
+					continue
+				}
+
+				switch randamuResponse.Type {
+				case 0:
+					var randomBytes scraper.RandamuBytesResponse
+					err = json.Unmarshal(randamuResponse.Response, &randomBytes)
+					if err != nil {
+						log.Error("Unmarshal Randamu random bytes: ", err)
+					} else {
+						log.Info("final result-----------------: ", randomBytes)
+					}
+				case 1:
+					var randomIntRange scraper.RandamuIntRangeResponse
+					err = json.Unmarshal(randamuResponse.Response, &randomIntRange)
+					if err != nil {
+						log.Error("Unmarshal Randamu random intRange: ", err)
+					} else {
+						log.Info("final result-----------------: ", randomIntRange)
+					}
+				case 2:
+					var randomInts scraper.RandamuIntResponse
+					err = json.Unmarshal(randamuResponse.Response, &randomInts)
+					if err != nil {
+						log.Error("Unmarshal Randamu random ints: ", err)
+					} else {
+						log.Info("final result-----------------: ", randomInts)
+					}
+				}
+
+			}
+
+		case <-updateDoneChannel:
+			// TO DO: We might need a switch here in order to account for different types of contracts.
+			// update oracle with collected keys and values.
+			log.Infof("collected %v responses. make oracle update...", len(values))
+			err := updateOracleMultiValues(contract, auth, keys, values, time.Now().Unix())
+			if err != nil {
+				log.Warnf("updater - Failed to update Oracle: %v.", err)
+				return
+			}
+		}
+
+	}
 }
 
 func updateOracleMultiValues(
-	client *ethclient.Client,
 	contract *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
 	auth *bind.TransactOpts,
-	chainId int64,
 	keys []string,
 	values []int64,
 	timestamp int64) error {
@@ -78,41 +120,6 @@ func updateOracleMultiValues(
 	var cValues []*big.Int
 	var gasPrice *big.Int
 	var err error
-
-	// Get proper gas price depending on chainId
-	switch chainId {
-	/*case 288: //Bobapkg/scraper/Uniswapv2.go
-	gasPrice = big.NewInt(1000000000)*/
-	case 592: //Astar
-		response, err := http.Get("https://gas.astar.network/api/gasnow?network=astar")
-		if err != nil {
-			return err
-		}
-
-		defer response.Body.Close()
-		if 200 != response.StatusCode {
-			return err
-		}
-		contents, err := ioutil.ReadAll(response.Body)
-		if err != nil {
-			return err
-		}
-
-		gasSuggestion := gjson.Get(string(contents), "data.fast")
-		gasPrice = big.NewInt(gasSuggestion.Int())
-	default:
-		// Get gas price suggestion
-		gasPrice, err = client.SuggestGasPrice(context.Background())
-		if err != nil {
-			log.Errorf("updater - SuggestGasPrice: %v.", err)
-			return err
-		}
-
-		// Get 110% of the gas price
-		fGas := new(big.Float).SetInt(gasPrice)
-		fGas.Mul(fGas, big.NewFloat(1.1))
-		gasPrice, _ = fGas.Int(nil)
-	}
 
 	for _, value := range values {
 		// Create compressed argument with values/timestamps

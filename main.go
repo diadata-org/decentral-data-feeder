@@ -1,13 +1,16 @@
 package main
 
 import (
+	"math/big"
 	"strconv"
-	"sync"
-	"time"
+	"strings"
 
-	models "github.com/diadata-org/decentral-data-feeder/pkg/models"
+	"github.com/diadata-org/decentral-data-feeder/pkg/onchain"
 	scraper "github.com/diadata-org/decentral-data-feeder/pkg/scraper"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
+	"github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/crypto"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -22,90 +25,63 @@ const (
 
 var (
 	// Comma separated list of exchanges. Only used in case pairs are read from config files.
-	source = utils.Getenv("SOURCE", "Coingecko")
-	// Comma separated list of assets which should be retrieved from @source.
-	// It is the responsability of each exchange scraper to determine the correct format for the corresponding API calls.
-	assets = utils.Getenv("ASSETS", "bitcoin,ethereum")
+	source = utils.Getenv("SOURCE", "Randamu")
 )
 
 func main() {
 
-	triggerChannel := make(chan time.Time)
-	wg := sync.WaitGroup{}
+	// wg := sync.WaitGroup{}
 
-	// // Feeder mechanics
-	// privateKeyHex := utils.Getenv("PRIVATE_KEY", "")
-	// deployedContract := utils.Getenv("DEPLOYED_CONTRACT", "")
-	// blockchainNode := utils.Getenv("BLOCKCHAIN_NODE", "https://testnet-rpc.diadata.org")
-	// backupNode := utils.Getenv("BACKUP_NODE", "https://testnet-rpc.diadata.org")
+	// Feeder mechanics
+	privateKeyHex := utils.Getenv("PRIVATE_KEY", "")
+	deployedContract := utils.Getenv("DEPLOYED_CONTRACT", "")
+	blockchainNode := utils.Getenv("BLOCKCHAIN_NODE", "")
+	backupNode := utils.Getenv("BACKUP_NODE", "")
 
-	// conn, err := ethclient.Dial(blockchainNode)
-	// if err != nil {
-	// 	log.Fatalf("Failed to connect to the Ethereum client: %v", err)
-	// }
-	// connBackup, err := ethclient.Dial(backupNode)
-	// if err != nil {
-	// 	log.Fatalf("Failed to connect to the backup Ethereum client: %v", err)
-	// }
-	// chainId, err := strconv.ParseInt(utils.Getenv("CHAIN_ID", "10640"), 10, 64)
-	// if err != nil {
-	// 	log.Fatalf("Failed to parse chainId: %v", err)
-	// }
-
-	// Frequency for the trigger ticker initiating the computation of filter values.
-	frequencySeconds, err := strconv.Atoi(utils.Getenv("FREQUENCY_SECONDS", "20"))
+	conn, err := utils.MakeEthClient(blockchainNode, backupNode)
 	if err != nil {
-		log.Fatalf("Failed to parse frequencySeconds: %v", err)
+		log.Fatalf("MakeEthClient: %v", err)
 	}
 
-	// privateKeyHex = strings.TrimPrefix(privateKeyHex, "0x")
+	chainId, err := strconv.ParseInt(utils.Getenv("CHAIN_ID", "100640"), 10, 64)
+	if err != nil {
+		log.Fatalf("Failed to parse chainId: %v", err)
+	}
 
-	// privateKey, err := crypto.HexToECDSA(privateKeyHex)
-	// if err != nil {
-	// 	log.Fatalf("Failed to load private key: %v", err)
-	// }
+	privateKeyHex = strings.TrimPrefix(privateKeyHex, "0x")
 
-	// auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(chainId))
-	// if err != nil {
-	// 	log.Fatalf("Failed to create authorized transactor: %v", err)
-	// }
+	privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	if err != nil {
+		log.Fatalf("Failed to load private key: %v", err)
+	}
 
-	// var contract, contractBackup *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService
-	// err = onchain.DeployOrBindContract(deployedContract, conn, connBackup, auth, &contract, &contractBackup)
-	// if err != nil {
-	// 	log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
-	// }
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(chainId))
+	if err != nil {
+		log.Fatalf("Failed to create authorized transactor: %v", err)
+	}
 
-	// Use a ticker for triggering the processing.
-	// This is for testing purposes for now. Could also be request based or other trigger types.
-	triggerTick := time.NewTicker(time.Duration(frequencySeconds) * time.Second)
-	go func() {
-		for tick := range triggerTick.C {
-			triggerChannel <- tick
-		}
-	}()
+	var contract *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService
+	err = onchain.DeployOrBindContract(deployedContract, conn, auth, &contract)
+	if err != nil {
+		log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
+	}
 
 	var DS scraper.DataScraper
 	switch source {
 	case scraper.COINMARKETCAP:
-		DS = scraper.NewDataScraper(scraper.COINMARKETCAP, &triggerChannel)
+		DS = scraper.NewDataScraper(scraper.COINMARKETCAP)
+		// TO DO: add oracle updater
 	case scraper.COINGECKO:
-		DS = scraper.NewDataScraper(scraper.COINGECKO, &triggerChannel)
+		DS = scraper.NewDataScraper(scraper.COINGECKO)
+		// TO DO: add oracle updater
+	case scraper.RANDAMU:
+		DS = scraper.NewDataScraper(scraper.RANDAMU)
+		// TO DO: amend oracle updater for randomness if necessary
+		onchain.OracleUpdateExecutor(auth, contract, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+	case scraper.TWELVEDATA:
+		DS = scraper.NewDataScraper(scraper.TWELVEDATA)
+		onchain.OracleUpdateExecutor(auth, contract, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+
 	}
 
-	wg.Add(1)
-	defer wg.Wait()
-	go handleData(DS.DataChannel(), DS, &wg)
-	// onchain.OracleUpdateExecutor(auth, contract, conn, chainId, filtersChannel)
-
-}
-
-func handleData(dataChannel chan models.Data, scraper scraper.DataScraper, wg *sync.WaitGroup) {
-	for {
-		select {
-		case data := <-dataChannel:
-			log.Info("data received: ", data)
-			// TO DO: case close scraper.
-		}
-	}
 }

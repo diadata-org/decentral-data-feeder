@@ -13,18 +13,13 @@ import (
 func DeployOrBindContract(
 	deployedContract string,
 	conn *ethclient.Client,
-	connBackup *ethclient.Client,
 	auth *bind.TransactOpts,
 	contract **diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
-	contractBackup **diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService) error {
+) error {
 	var err error
 	if deployedContract != "" {
 		// bind primary and backup
 		*contract, err = diaOracleV2MultiupdateService.NewDiaOracleV2MultiupdateService(common.HexToAddress(deployedContract), conn)
-		if err != nil {
-			return err
-		}
-		*contractBackup, err = diaOracleV2MultiupdateService.NewDiaOracleV2MultiupdateService(common.HexToAddress(deployedContract), connBackup)
 		if err != nil {
 			return err
 		}
@@ -39,11 +34,6 @@ func DeployOrBindContract(
 		}
 		log.Infof("Contract pending deploy: 0x%x.", addr)
 		log.Infof("Transaction waiting to be mined: 0x%x.", tx.Hash())
-		// bind backup
-		*contractBackup, err = diaOracleV2MultiupdateService.NewDiaOracleV2MultiupdateService(addr, connBackup)
-		if err != nil {
-			return err
-		}
 		time.Sleep(180000 * time.Millisecond)
 	}
 	return nil

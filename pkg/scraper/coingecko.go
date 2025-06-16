@@ -1,12 +1,12 @@
 package scraper
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	models "github.com/diadata-org/decentral-data-feeder/pkg/models"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
 	"github.com/tidwall/gjson"
 )
@@ -17,27 +17,35 @@ const (
 )
 
 type CGScraper struct {
-	apiKey       string
-	assetNames   string
-	apiValuePath string
-	dataChannel  chan models.Data
+	apiKey            string
+	assetNames        string
+	apiValuePath      string
+	dataChannel       chan []byte
+	updateDoneChannel chan bool
 }
 
-func NewCGScraper(triggerChannel *chan time.Time) *CGScraper {
+type CGResponse struct {
+	Symbol    string
+	Value     float64
+	Timestamp time.Time
+}
+
+func NewCGScraper() *CGScraper {
 	var scraper CGScraper
 	scraper.apiKey = utils.Getenv("CG_PRO_API_KEY", "")
 	scraper.assetNames = utils.Getenv("CG_ASSET_NAMES", "bitcoin,ethereum")
 	scraper.apiValuePath = utils.Getenv("CG_API_VALUE_PATH", "usd")
 	// scraper.apiValuePath = utils.Getenv("CG_API_VALUE_PATH", "usd_24h_vol")
-	scraper.dataChannel = make(chan models.Data)
+	scraper.dataChannel = make(chan []byte)
+	scraper.updateDoneChannel = make(chan bool)
 
-	go scraper.run(triggerChannel)
+	go scraper.run()
 	return &scraper
 }
 
-func (scraper *CGScraper) run(triggerChannel *chan time.Time) {
-	for range *triggerChannel {
-		log.Info("trigger")
+func (scraper *CGScraper) run() {
+	tick := time.NewTicker(time.Duration(120 * time.Second))
+	for range tick.C {
 		scraper.getCGPrice(scraper.assetNames, scraper.apiKey)
 	}
 }
@@ -65,13 +73,15 @@ func (scraper *CGScraper) getCGPrice(assetName, apiKey string) error {
 	data := gjson.ParseBytes(contents)
 
 	data.ForEach(func(key, value gjson.Result) bool {
-		var d models.Data
-		d.Symbol = key.String()
-		d.Value = gjson.Get(value.String(), scraper.apiValuePath).Float()
-		d.Timestamp = time.Unix(gjson.Get(value.String(), "last_updated_at").Int(), 0)
-
-		d.Source = COINGECKO
-		scraper.DataChannel() <- d
+		var resp CGResponse
+		resp.Symbol = key.String()
+		resp.Value = gjson.Get(value.String(), scraper.apiValuePath).Float()
+		resp.Timestamp = time.Unix(gjson.Get(value.String(), "last_updated_at").Int(), 0)
+		data, err := json.Marshal(resp)
+		if err != nil {
+			log.Error("Marshal data: ", err)
+		}
+		scraper.DataChannel() <- data
 		return true
 	})
 
@@ -83,6 +93,10 @@ func (scraper *CGScraper) Close() error {
 	return nil
 }
 
-func (scraper *CGScraper) DataChannel() chan models.Data {
+func (scraper *CGScraper) DataChannel() chan []byte {
 	return scraper.dataChannel
+}
+
+func (scraper *CGScraper) UpdateDoneChannel() chan bool {
+	return scraper.updateDoneChannel
 }

@@ -1,13 +1,13 @@
 package scraper
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	models "github.com/diadata-org/decentral-data-feeder/pkg/models"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
 	"github.com/tidwall/gjson"
 )
@@ -16,26 +16,35 @@ const COINMARKETCAP = "Coinmarketcap"
 const COINMARKETCAP_API_BASE_URL = "https://pro-api.coinmarketcap.com/v1"
 
 type CMCScraper struct {
-	apiKey       string
-	assetNames   string
-	apiValuePath string
-	dataChannel  chan models.Data
+	apiKey            string
+	assetNames        string
+	apiValuePath      string
+	dataChannel       chan []byte
+	updateDoneChannel chan bool
 }
 
-func NewCMCScraper(triggerChannel *chan time.Time) *CMCScraper {
+type CMCResponse struct {
+	Symbol    string
+	Value     float64
+	Timestamp time.Time
+}
+
+func NewCMCScraper() *CMCScraper {
 	var scraper CMCScraper
 	scraper.apiKey = utils.Getenv("CMC_PRO_API_KEY", "")
 	scraper.assetNames = utils.Getenv("CMC_ASSET_NAMES", "1,2,3")
 	scraper.apiValuePath = utils.Getenv("CMC_API_VALUE_PATH", "quote.USD.price")
 	// scraper.apiValuePath = utils.Getenv("CMC_API_VALUE_PATH", "circulating_supply")
-	scraper.dataChannel = make(chan models.Data)
+	scraper.dataChannel = make(chan []byte)
+	scraper.updateDoneChannel = make(chan bool)
 
-	go scraper.run(triggerChannel)
+	go scraper.run()
 	return &scraper
 }
 
-func (scraper *CMCScraper) run(triggerChannel *chan time.Time) {
-	for range *triggerChannel {
+func (scraper *CMCScraper) run() {
+	tick := time.NewTicker(time.Duration(120 * time.Second))
+	for range tick.C {
 		scraper.getCmcPrices(scraper.assetNames, scraper.apiKey)
 	}
 }
@@ -60,15 +69,19 @@ func (scraper *CMCScraper) getCmcPrices(assetNames, apiKey string) error {
 	data := gjson.GetBytes(contents, "data")
 
 	data.ForEach(func(key, value gjson.Result) bool {
-		var d models.Data
-		d.Symbol = gjson.Get(value.String(), "symbol").String()
-		d.Value = gjson.Get(value.String(), scraper.apiValuePath).Float()
-		d.Timestamp, err = time.Parse(time.RFC3339, gjson.Get(value.String(), "quote.USD.last_updated").String())
+		var resp CMCResponse
+		resp.Symbol = gjson.Get(value.String(), "symbol").String()
+		resp.Value = gjson.Get(value.String(), scraper.apiValuePath).Float()
+		resp.Timestamp, err = time.Parse(time.RFC3339, gjson.Get(value.String(), "quote.USD.last_updated").String())
 		if err != nil {
 			log.Error("CMC - Parse timestamp: ", err)
 		}
-		d.Source = COINMARKETCAP
-		scraper.DataChannel() <- d
+		data, err := json.Marshal(resp)
+		if err != nil {
+			log.Error("Marshal response: ", err)
+		}
+
+		scraper.DataChannel() <- data
 		return true
 	})
 
@@ -80,6 +93,10 @@ func (scraper *CMCScraper) Close() error {
 	return nil
 }
 
-func (scraper *CMCScraper) DataChannel() chan models.Data {
+func (scraper *CMCScraper) DataChannel() chan []byte {
 	return scraper.dataChannel
+}
+
+func (scraper *CMCScraper) UpdateDoneChannel() chan bool {
+	return scraper.updateDoneChannel
 }

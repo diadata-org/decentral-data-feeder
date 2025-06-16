@@ -1,9 +1,10 @@
 module github.com/diadata-org/decentral-data-feeder
 
-go 1.22
+go 1.23
+
+toolchain go1.23.4
 
 require (
-	github.com/diadata-org/decentral-feeder v0.0.0-20241128093745-37c635dc1a5f
 	github.com/diadata-org/diadata v1.4.563
 	github.com/ethereum/go-ethereum v1.14.12
 	github.com/sirupsen/logrus v1.9.3
@@ -22,7 +23,6 @@ require (
 	github.com/ethereum/c-kzg-4844 v1.0.2 // indirect
 	github.com/ethereum/go-verkle v0.1.1-0.20240829091221-dffa7562dbe9 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
-	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect
@@ -32,7 +32,6 @@ require (
 	github.com/supranational/blst v0.3.13 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
-	github.com/tkanos/gonfig v0.0.0-20210106201359-53e13348de2f // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
@@ -41,10 +40,9 @@ require (
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
 replace github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
 
-// replace github.com/diadata-org/decentral-data-feeder => /home/philipp/go/src/github.com/diadata-org/decentral-data-feeder/pkg/onchain
+replace github.com/diadata-org/decentral-data-feeder => /home/philipp/go/src/github.com/diadata-org/decentral-data-feeder/pkg/onchain

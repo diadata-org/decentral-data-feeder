@@ -1,23 +1,22 @@
 package scraper
 
-import (
-	"time"
-
-	models "github.com/diadata-org/decentral-data-feeder/pkg/models"
-)
-
 type DataScraper interface {
 	// DataChannel enables a scraper to transport scraped data.
-	DataChannel() chan models.Data
+	DataChannel() chan []byte
+	UpdateDoneChannel() chan bool
 	Close() error
 }
 
-func NewDataScraper(source string, triggerChannel *chan time.Time) DataScraper {
+func NewDataScraper(source string) DataScraper {
 	switch source {
 	case COINMARKETCAP:
-		return NewCMCScraper(triggerChannel)
+		return NewCMCScraper()
 	case COINGECKO:
-		return NewCGScraper(triggerChannel)
+		return NewCGScraper()
+	case RANDAMU:
+		return NewRandamuScraper()
+	case TWELVEDATA:
+		return NewTwelvedataScraper()
 	default:
 		return nil
 	}
