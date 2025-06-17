@@ -29,10 +29,11 @@ type twelvedataAPIStockResponse struct {
 }
 
 type twelvedataQuoteResponse struct {
-	Symbol    string `json:"symbol"`
-	Name      string `json:"name"`
-	Timestamp int64  `json:"last_quote_at"`
-	Price     string `json:"close"`
+	Symbol     string `json:"symbol"`
+	Name       string `json:"name"`
+	Timestamp  int64  `json:"last_quote_at"`
+	Price      string `json:"close"`
+	MarketOpen bool   `json:"is_market_open"`
 }
 
 type TwelvedataQuote struct {
@@ -45,14 +46,15 @@ type TwelvedataQuote struct {
 }
 
 type TwelvedataScraper struct {
-	dataChannel            chan []byte
-	updateDoneChannel      chan bool
-	ticker                 *time.Ticker
-	twelvedataStockSymbols []string
-	twelvedataFXTickers    []string
-	twelvedataCommodities  []string
-	twelvedataETFs         []string
-	apiKey                 string
+	dataChannel               chan []byte
+	updateDoneChannel         chan bool
+	ticker                    *time.Ticker
+	twelvedataStockSymbols    []string
+	twelvedataStockMarketOpen bool
+	twelvedataFXTickers       []string
+	twelvedataCommodities     []string
+	twelvedataETFs            []string
+	apiKey                    string
 }
 
 func init() {
@@ -73,6 +75,7 @@ func NewTwelvedataScraper() *TwelvedataScraper {
 		twelvedataETFs:         strings.Split(utils.Getenv("ETF", ""), ","),
 		apiKey:                 utils.Getenv("TWELVEDATA_API_KEY", ""),
 	}
+
 	s.dataChannel = make(chan []byte)
 	s.updateDoneChannel = make(chan bool)
 
@@ -107,33 +110,50 @@ func (scraper *TwelvedataScraper) mainLoop() {
 // Update retrieves new coin information from the twelvedata API and stores it to influx
 func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
+	marketTime, err := isMarketTime()
+	if err != nil {
+		log.Error("isMarketOpen: ", err)
+	}
+	if marketTime {
+		// Check if markets are open.
+		quote, err := scraper.getTwelveQuote("AAPL")
+		if err != nil {
+			log.Error("getTwelveQuote: ", err)
+		}
+		scraper.twelvedataStockMarketOpen = quote.MarketOpen
+	} else {
+		scraper.twelvedataStockMarketOpen = false
+	}
+
 	log.Infof("Executing stock data update for %v symbols", len(scraper.twelvedataStockSymbols))
-	for _, symbol := range scraper.twelvedataStockSymbols {
-		if symbol == "" {
-			continue
-		}
-		quotation, err := scraper.getTwelveStockData(symbol)
-		if err != nil {
-			log.Error("getTwelveStockData: ", err)
-		}
-		price, err := strconv.ParseFloat(quotation.Price, 64)
-		if err != nil {
-			log.Error("Parse Float for: ", symbol)
-		}
+	if scraper.twelvedataStockMarketOpen {
+		for _, symbol := range scraper.twelvedataStockSymbols {
+			if symbol == "" {
+				continue
+			}
+			quotation, err := scraper.getTwelveStockPrice(symbol)
+			if err != nil {
+				log.Error("getTwelveStockPrice: ", err)
+			}
+			price, err := strconv.ParseFloat(quotation.Price, 64)
+			if err != nil {
+				log.Error("Parse Float for: ", symbol)
+			}
 
-		quote := TwelvedataQuote{
-			Symbol:   symbol,
-			Price:    price,
-			Time:     time.Now(),
-			Source:   TWELVEDATA,
-			DataType: "Stock",
-		}
+			quote := TwelvedataQuote{
+				Symbol:   symbol,
+				Price:    price,
+				Time:     time.Now(),
+				Source:   TWELVEDATA,
+				DataType: "Stock",
+			}
 
-		quoteBytes, err := json.Marshal(quote)
-		if err != nil {
-			log.Error("marshal stock data: ", err)
+			quoteBytes, err := json.Marshal(quote)
+			if err != nil {
+				log.Error("marshal stock data: ", err)
+			}
+			scraper.dataChannel <- quoteBytes
 		}
-		scraper.dataChannel <- quoteBytes
 	}
 
 	log.Infof("Executing fx data update for %v symbols", len(scraper.twelvedataFXTickers))
@@ -238,7 +258,7 @@ func (scraper *TwelvedataScraper) getTwelveFXData(symbol string) (fxRate twelved
 	return
 }
 
-func (scraper *TwelvedataScraper) getTwelveStockData(symbol string) (stockPrice twelvedataAPIStockResponse, err error) {
+func (scraper *TwelvedataScraper) getTwelveStockPrice(symbol string) (stockPrice twelvedataAPIStockResponse, err error) {
 	var response []byte
 
 	apiURL := twelvedataApiBaseString + "price?symbol=" + symbol + "&apikey=" + scraper.apiKey
@@ -274,4 +294,18 @@ func (scraper *TwelvedataScraper) UpdateDoneChannel() chan bool {
 
 func (scraper *TwelvedataScraper) Close() error {
 	return nil
+}
+
+func isMarketTime() (bool, error) {
+	// Load the America/New_York location (EST/EDT with daylight saving)
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return false, err
+	}
+	now := time.Now().In(loc)
+
+	openTime := time.Date(now.Year(), now.Month(), now.Day(), 8, 50, 0, 0, loc)
+	closeTime := time.Date(now.Year(), now.Month(), now.Day(), 16, 10, 0, 0, loc)
+
+	return now.After(openTime) && now.Before(closeTime), nil
 }
