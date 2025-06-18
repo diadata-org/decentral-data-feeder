@@ -125,8 +125,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		scraper.twelvedataStockMarketOpen = false
 	}
 
-	log.Infof("Executing stock data update for %v symbols", len(scraper.twelvedataStockSymbols))
 	if scraper.twelvedataStockMarketOpen {
+		log.Infof("Executing stock data update for %v symbols", getNumSymbols(scraper.twelvedataStockSymbols))
 		for _, symbol := range scraper.twelvedataStockSymbols {
 			if symbol == "" {
 				continue
@@ -154,9 +154,11 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			}
 			scraper.dataChannel <- quoteBytes
 		}
+	} else {
+		log.Info("Stock market closed. No updates.")
 	}
 
-	log.Infof("Executing fx data update for %v symbols", len(scraper.twelvedataFXTickers))
+	log.Infof("Executing fx data update for %v symbols", getNumSymbols(scraper.twelvedataFXTickers))
 	for _, ticker := range scraper.twelvedataFXTickers {
 		if ticker == "" {
 			continue
@@ -181,7 +183,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		scraper.dataChannel <- quoteBytes
 	}
 
-	log.Infof("Executing commodities data update for %v symbols.", len(scraper.twelvedataCommodities))
+	log.Infof("Executing commodities data update for %v symbols.", getNumSymbols(scraper.twelvedataCommodities))
 	for _, ticker := range scraper.twelvedataCommodities {
 		if ticker == "" {
 			continue
@@ -211,7 +213,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		scraper.dataChannel <- quoteBytes
 	}
 
-	log.Infof("Executing ETF data update for %v symbols", len(scraper.twelvedataETFs))
+	log.Infof("Executing ETF data update for %v symbols", getNumSymbols(scraper.twelvedataETFs))
 	for _, ticker := range scraper.twelvedataETFs {
 		if ticker == "" {
 			continue
@@ -308,4 +310,15 @@ func isMarketTime() (bool, error) {
 	closeTime := time.Date(now.Year(), now.Month(), now.Day(), 16, 10, 0, 0, loc)
 
 	return now.After(openTime) && now.Before(closeTime), nil
+}
+
+func getNumSymbols(symbols []string) int {
+	l := len(symbols)
+	if l == 0 {
+		return 0
+	}
+	if l == 1 && symbols[0] == "" {
+		return 0
+	}
+	return l
 }
