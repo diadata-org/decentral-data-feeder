@@ -13,7 +13,9 @@ import (
 )
 
 var (
-	log *logrus.Logger
+	log    *logrus.Logger
+	keys   []string
+	values []int64
 )
 
 func init() {
@@ -37,9 +39,6 @@ func OracleUpdateExecutor(
 	dataChannel <-chan []byte,
 	updateDoneChannel chan bool,
 ) {
-
-	var keys []string
-	var values []int64
 
 	for {
 
@@ -105,6 +104,9 @@ func OracleUpdateExecutor(
 				log.Warnf("updater - Failed to update Oracle: %v.", err)
 				return
 			}
+			// reset keys and values for next update.
+			keys = []string{}
+			values = []int64{}
 		}
 
 	}
