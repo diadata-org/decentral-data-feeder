@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
 )
@@ -52,7 +51,7 @@ type RandamuBytesRequest struct {
 type RandamuBytesResponse struct {
 	RequestID  string          `json:"request_id"`
 	Metadata   RandamuMetadata `json:"metadata"`
-	Randonmess []string        `json:"randomness"`
+	Randomness []string        `json:"randomness"`
 }
 
 type RandamuIntRangeRequest struct {
@@ -95,23 +94,23 @@ func NewRandamuScraper() *RandamuScraper {
 	go scraper.listen()
 
 	// // Test IntRequest ------------------------------------------------------
-	// var requestInt RandamuIntRequest
-	// requestInt.BitSize = uint8(8)
-	// requestInt.NumInts = uint8(10)
-	// requestInt.RequestID = "testID"
-	// requestBody, err := json.Marshal(requestInt)
-	// if err != nil {
-	// 	log.Error("marshal requestInt: ", err)
-	// }
-	// var request RandamuRequest
-	// request.Body = requestBody
-	// request.Type = 2
-	// requestByte, err := json.Marshal(request)
-	// if err != nil {
-	// 	log.Error("marshal request: ", err)
-	// }
+	var requestInt RandamuIntRequest
+	requestInt.BitSize = uint8(8)
+	requestInt.NumInts = uint8(10)
+	requestInt.RequestID = "testID"
+	requestBody, err := json.Marshal(requestInt)
+	if err != nil {
+		log.Error("marshal requestInt: ", err)
+	}
+	var request RandamuRequest
+	request.Body = requestBody
+	request.Type = 2
+	requestByte, err := json.Marshal(request)
+	if err != nil {
+		log.Error("marshal request: ", err)
+	}
 
-	// scraper.requestChannel <- requestByte
+	scraper.requestChannel <- requestByte
 	// // Test ----------------------------------------------------------------
 
 	// // Test ByteRequest ------------------------------------------------------
@@ -132,33 +131,33 @@ func NewRandamuScraper() *RandamuScraper {
 	// }
 
 	// scraper.requestChannel <- requestMarshalled
-	// // // Test ----------------------------------------------------------------
+	// // Test ----------------------------------------------------------------
 
 	// Test IntRangeRequest ------------------------------------------------------
-	testTicker := time.NewTicker(time.Duration(30 * time.Second))
-	go func() {
-		for range testTicker.C {
-			var requestIntRange RandamuIntRangeRequest
-			requestIntRange.Min = uint8(4)
-			requestIntRange.Max = uint8(10)
-			requestIntRange.NumInts = uint8(4)
-			requestIntRange.RequestID = "testID"
-			requestBody, err := json.Marshal(requestIntRange)
-			if err != nil {
-				log.Error("marshal requestInt: ", err)
-			}
-			var request RandamuRequest
-			request.Body = requestBody
-			request.Type = 1
-			requestMarshalled, err := json.Marshal(request)
-			if err != nil {
-				log.Error("marshal request: ", err)
-			}
+	// testTicker := time.NewTicker(time.Duration(10 * time.Second))
+	// go func() {
+	// 	for range testTicker.C {
+	// 		var requestIntRange RandamuIntRangeRequest
+	// 		requestIntRange.Min = uint8(2)
+	// 		requestIntRange.Max = uint8(10)
+	// 		requestIntRange.NumInts = uint8(4)
+	// 		requestIntRange.RequestID = "testID"
+	// 		requestBody, err := json.Marshal(requestIntRange)
+	// 		if err != nil {
+	// 			log.Error("marshal requestInt: ", err)
+	// 		}
+	// 		var request RandamuRequest
+	// 		request.Body = requestBody
+	// 		request.Type = 1
+	// 		requestMarshalled, err := json.Marshal(request)
+	// 		if err != nil {
+	// 			log.Error("marshal request: ", err)
+	// 		}
 
-			scraper.requestChannel <- requestMarshalled
-		}
-	}()
-	// // Test ----------------------------------------------------------------
+	// 		scraper.requestChannel <- requestMarshalled
+	// 	}
+	// }()
+	// Test ----------------------------------------------------------------
 
 	return &scraper
 }
