@@ -9,7 +9,12 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+
+	requestor "github.com/diadata-org/decentral-data-feeder/contracts/VRFRequestor"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const (
@@ -22,6 +27,9 @@ type RandamuScraper struct {
 	requestChannel    chan []byte
 	dataChannel       chan []byte
 	updateDoneChannel chan bool
+	requestorContract string
+	restClient        *ethclient.Client
+	wsClient          *ethclient.Client
 }
 
 type RandamuMetadata struct {
@@ -40,6 +48,7 @@ type RandamuResponse struct {
 	Response []byte
 }
 
+// Type 0
 type RandamuBytesRequest struct {
 	// request parameters for array of random bytes
 	RequestID string
@@ -54,6 +63,7 @@ type RandamuBytesResponse struct {
 	Randomness []string        `json:"randomness"`
 }
 
+// Type 1
 type RandamuIntRangeRequest struct {
 	// request parameters for a range of ints with limits
 	RequestID string
@@ -69,6 +79,7 @@ type RandamuIntRangeResponse struct {
 	Ints      []string        `json:"randomness"`
 }
 
+// Type 2
 type RandamuIntRequest struct {
 	// request parameters for array of random ints
 	RequestID string
@@ -90,27 +101,38 @@ func NewRandamuScraper() *RandamuScraper {
 	scraper.dataChannel = make(chan []byte)
 	scraper.requestChannel = make(chan []byte)
 	scraper.updateDoneChannel = make(chan bool)
+	scraper.requestorContract = utils.Getenv("REQUESTOR_CONTRACT", "0xB27386dE97c6940929Ce0F3D06E396bD36A7e027")
+	restClient, err := ethclient.Dial(utils.Getenv("LUMINA_REST_CLIENT", ""))
+	if err != nil {
+		log.Fatal("get lumina rest client: ", err)
+	}
+	wsClient, err := ethclient.Dial(utils.Getenv("LUMINA_WS_CLIENT", ""))
+	if err != nil {
+		log.Fatal("get lumina ws client: ", err)
+	}
+	scraper.restClient = restClient
+	scraper.wsClient = wsClient
 
 	go scraper.listen()
 
-	// // Test IntRequest ------------------------------------------------------
-	var requestInt RandamuIntRequest
-	requestInt.BitSize = uint8(8)
-	requestInt.NumInts = uint8(10)
-	requestInt.RequestID = "testID"
-	requestBody, err := json.Marshal(requestInt)
-	if err != nil {
-		log.Error("marshal requestInt: ", err)
-	}
-	var request RandamuRequest
-	request.Body = requestBody
-	request.Type = 2
-	requestByte, err := json.Marshal(request)
-	if err != nil {
-		log.Error("marshal request: ", err)
-	}
+	// // // Test IntRequest ------------------------------------------------------
+	// var requestInt RandamuIntRequest
+	// requestInt.BitSize = uint8(8)
+	// requestInt.NumInts = uint8(10)
+	// requestInt.RequestID = "testID"
+	// requestBody, err := json.Marshal(requestInt)
+	// if err != nil {
+	// 	log.Error("marshal requestInt: ", err)
+	// }
+	// var request RandamuRequest
+	// request.Body = requestBody
+	// request.Type = 2
+	// requestByte, err := json.Marshal(request)
+	// if err != nil {
+	// 	log.Error("marshal request: ", err)
+	// }
 
-	scraper.requestChannel <- requestByte
+	// scraper.requestChannel <- requestByte
 	// // Test ----------------------------------------------------------------
 
 	// // Test ByteRequest ------------------------------------------------------
@@ -166,16 +188,66 @@ func (scraper *RandamuScraper) listen() {
 
 	// TO DO: Listen to requests from requestor.
 	log.Info("listen")
-
-	// For now, assume @response is a response from listening to the requestor.
-	for request := range scraper.requestChannel {
-		response, err := scraper.requestData(request)
-		if err != nil {
-			log.Error("requestData: ", err)
-		} else {
-			scraper.DataChannel() <- response
-		}
+	requestFilterer, err := requestor.NewVRFRequestorFilterer(common.HexToAddress(scraper.requestorContract), scraper.wsClient)
+	if err != nil {
+		log.Error("NewVRFRequestorFilterer: ", err)
+		return
 	}
+
+	requestSink := make(chan *requestor.VRFRequestorRequestReceived)
+	sub, err := requestFilterer.WatchRequestReceived(&bind.WatchOpts{}, requestSink, nil)
+	if err != nil {
+		log.Error("WatchRequestReceived: ", err)
+	}
+
+	go func() {
+		for {
+			select {
+			case r, ok := <-requestSink:
+				if !ok {
+					log.Warn("Event channel closed")
+					return
+				}
+				log.Infof("got request: numValues -- requestId -- seed: %v -- %s -- %s ", r.NumOfValues.Int64(), r.RequestId.String(), r.Seed)
+				response, err := scraper.processRequestEvent(r)
+				if err != nil {
+					log.Error("requestData: ", err)
+				} else {
+					scraper.DataChannel() <- response
+				}
+			case err := <-sub.Err():
+				log.Error("Subscription error: ", err)
+				return
+			}
+		}
+	}()
+
+}
+
+func (scraper *RandamuScraper) processRequestEvent(requestEvent *requestor.VRFRequestorRequestReceived) ([]byte, error) {
+	var randamuRequest RandamuRequest
+
+	// For the MVP we're currently restricted to int arrays.
+	randamuRequest.Type = 2
+
+	// Fill request types and marshal them.
+	var requestInt RandamuIntRequest
+	requestInt.BitSize = 64
+	requestInt.NumInts = uint8(requestEvent.NumOfValues.Int64())
+	requestInt.RequestID = requestEvent.RequestId.String()
+	requestInt.Seed = requestEvent.Seed
+	requestBody, err := json.Marshal(requestInt)
+	if err != nil {
+		log.Error("marshal requestInt: ", err)
+	}
+	randamuRequest.Body = requestBody
+	requestByte, err := json.Marshal(randamuRequest)
+	if err != nil {
+		log.Error("marshal request: ", err)
+	}
+
+	// make randamu request using marshalled request data and send the obtained response to main.
+	return scraper.requestData(requestByte)
 
 }
 

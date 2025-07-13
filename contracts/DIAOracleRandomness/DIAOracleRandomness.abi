@@ -16,6 +16,11 @@
     ],
     "outputs": [
       {
+        "name": "requestId",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
         "name": "randomness",
         "type": "string[]",
         "internalType": "string[]"
@@ -44,6 +49,11 @@
       }
     ],
     "outputs": [
+      {
+        "name": "requestId",
+        "type": "string",
+        "internalType": "string"
+      },
       {
         "name": "randomInts",
         "type": "int256[]",
@@ -74,6 +84,11 @@
     ],
     "outputs": [
       {
+        "name": "requestId",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
         "name": "randomInts",
         "type": "uint256[]",
         "internalType": "uint256[]"
@@ -95,6 +110,11 @@
     "type": "function",
     "name": "setBytes",
     "inputs": [
+      {
+        "name": "requestId",
+        "type": "string",
+        "internalType": "string"
+      },
       {
         "name": "randomness",
         "type": "string[]",
@@ -124,6 +144,11 @@
     "name": "setIntArray",
     "inputs": [
       {
+        "name": "requestId",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
         "name": "randomInts",
         "type": "int256[]",
         "internalType": "int256[]"
@@ -151,6 +176,11 @@
     "type": "function",
     "name": "setIntRange",
     "inputs": [
+      {
+        "name": "requestId",
+        "type": "string",
+        "internalType": "string"
+      },
       {
         "name": "randomInts",
         "type": "uint256[]",
@@ -193,6 +223,12 @@
     "name": "BytesSet",
     "inputs": [
       {
+        "name": "requestId",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
         "name": "round",
         "type": "int256",
         "indexed": true,
@@ -218,6 +254,12 @@
     "name": "IntArraySet",
     "inputs": [
       {
+        "name": "requestId",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
         "name": "round",
         "type": "int256",
         "indexed": true,
@@ -242,6 +284,12 @@
     "type": "event",
     "name": "IntRangeSet",
     "inputs": [
+      {
+        "name": "requestId",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
       {
         "name": "round",
         "type": "int256",

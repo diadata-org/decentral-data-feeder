@@ -132,7 +132,6 @@ func OracleUpdateExecutor(
 }
 
 func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, auth *bind.TransactOpts, data any) error {
-
 	var gasPrice *big.Int
 
 	switch data := data.(type) {
@@ -142,6 +141,7 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 			Signer:   auth.Signer,
 			GasPrice: gasPrice,
 		},
+			data.RequestID,
 			data.Randomness,
 			data.Metadata.Round,
 			data.Metadata.Seed,
@@ -166,6 +166,7 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 			Signer:   auth.Signer,
 			GasPrice: gasPrice,
 		},
+			data.RequestID,
 			bigInts,
 			data.Metadata.Round,
 			data.Metadata.Seed,
@@ -185,11 +186,13 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 			}
 			bigInts = append(bigInts, big.NewInt(i64))
 		}
+
 		tx, err := contract.SetIntArray(&bind.TransactOpts{
 			From:     auth.From,
 			Signer:   auth.Signer,
 			GasPrice: gasPrice,
 		},
+			data.RequestID,
 			bigInts,
 			data.Metadata.Round,
 			data.Metadata.Seed,
