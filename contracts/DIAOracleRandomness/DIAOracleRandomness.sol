@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 contract DIAOracleRandomness {
 
     struct BytesEntry {
-        string requestId;
+        uint256 requestId;
         string[] randomness;
         string seed;
         string signature;
@@ -12,7 +12,7 @@ contract DIAOracleRandomness {
     }
 
     struct IntRangeEntry {
-        string requestId;
+        uint256 requestId;
         uint256[] randomInts;
         string seed;
         string signature;
@@ -20,22 +20,22 @@ contract DIAOracleRandomness {
     }
 
     struct IntArrayEntry {
-        string requestId;
+        uint256 requestId;
         int256[] randomInts;
         string seed;
         string signature;
         bool exists;
     }
 
-    mapping(string => BytesEntry) private bytesEntries;
-    mapping(string => IntRangeEntry) private intRangeEntries;
-    mapping(string => IntArrayEntry) private intArrayEntries;
+    mapping(uint256 => BytesEntry) private bytesEntries;
+    mapping(uint256 => IntRangeEntry) private intRangeEntries;
+    mapping(uint256 => IntArrayEntry) private intArrayEntries;
    
     address oracleUpdater;
     
-    event BytesSet(string requestId, int256 indexed round, string seed, string signature);
-    event IntRangeSet(string requestId, int256 indexed round, string seed, string signature);
-    event IntArraySet(string requestId, int256 indexed round, string seed, string signature);
+    event BytesSet(uint256 requestId, int256 indexed round, string seed, string signature);
+    event IntRangeSet(uint256 requestId, int256 indexed round, string seed, string signature);
+    event IntArraySet(uint256 requestId, int256 indexed round, string seed, string signature);
     event UpdaterAddressChange(address newUpdater);
     
     constructor() {
@@ -44,7 +44,7 @@ contract DIAOracleRandomness {
     
     // SetBytes
     function setBytes(
-        string calldata requestId,
+        uint256 requestId,
         string[] calldata randomness,
         int64 round,
         string calldata seed,
@@ -61,8 +61,8 @@ contract DIAOracleRandomness {
     }
 
     // ReadBytes: returns full array, seed, and signature
-    function getBytes(string calldata requestId_) external view returns (
-        string memory requestId,
+    function getBytes(uint256 requestId_) external view returns (
+        uint256 requestId,
         string[] memory randomness,
         string memory seed,
         string memory signature
@@ -74,7 +74,7 @@ contract DIAOracleRandomness {
 
     // SetIntRange
     function setIntRange(
-        string calldata requestId,
+        uint256 requestId,
         uint256[] calldata randomInts,
         int64 round,
         string calldata seed,
@@ -91,8 +91,8 @@ contract DIAOracleRandomness {
     }
 
     // ReadIntRange
-    function getIntRange(string calldata requestId_) external view returns (
-        string memory requestId,
+    function getIntRange(uint256 requestId_) external view returns (
+        uint256 requestId,
         uint256[] memory randomInts,
         string memory seed,
         string memory signature
@@ -104,7 +104,7 @@ contract DIAOracleRandomness {
 
     // SetIntArray
     function setIntArray(
-        string calldata requestId,
+        uint256 requestId,
         int256[] calldata randomInts,
         int64 round,
         string calldata seed,
@@ -121,8 +121,8 @@ contract DIAOracleRandomness {
     }
 
     // ReadIntArray
-    function getIntArray(string calldata requestId_) external view returns (
-        string memory requestId,
+    function getIntArray(uint256 requestId_) external view returns (
+        uint256 requestId,
         int256[] memory randomInts,
         string memory seed,
         string memory signature
