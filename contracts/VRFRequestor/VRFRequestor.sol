@@ -27,11 +27,15 @@ contract RandomRequestManager {
         requestId = uint256(keccak256(abi.encode(msg.sender, counter++)));
         requests[requestId] = Request("", numOfValues);
         emit RequestReceived(requestId, "", numOfValues);
+
+        return requestId;
     }
 
     function request(string calldata seed, uint256 numOfValues) external returns (uint256 requestId) {
         requestId = uint256(keccak256(abi.encode(msg.sender, counter++)));
         requests[requestId] = Request(seed, numOfValues);
         emit RequestReceived(requestId, seed, numOfValues);
+
+        return requestId;
     }
 }
