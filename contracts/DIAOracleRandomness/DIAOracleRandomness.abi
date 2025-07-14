@@ -10,15 +10,15 @@
     "inputs": [
       {
         "name": "requestId_",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "requestId",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "randomness",
@@ -44,15 +44,15 @@
     "inputs": [
       {
         "name": "requestId_",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "requestId",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "randomInts",
@@ -78,15 +78,15 @@
     "inputs": [
       {
         "name": "requestId_",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "requestId",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "randomInts",
@@ -112,8 +112,8 @@
     "inputs": [
       {
         "name": "requestId",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "randomness",
@@ -145,8 +145,8 @@
     "inputs": [
       {
         "name": "requestId",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "randomInts",
@@ -178,8 +178,8 @@
     "inputs": [
       {
         "name": "requestId",
-        "type": "string",
-        "internalType": "string"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "randomInts",
@@ -224,9 +224,9 @@
     "inputs": [
       {
         "name": "requestId",
-        "type": "string",
+        "type": "uint256",
         "indexed": false,
-        "internalType": "string"
+        "internalType": "uint256"
       },
       {
         "name": "round",
@@ -255,9 +255,9 @@
     "inputs": [
       {
         "name": "requestId",
-        "type": "string",
+        "type": "uint256",
         "indexed": false,
-        "internalType": "string"
+        "internalType": "uint256"
       },
       {
         "name": "round",
@@ -286,9 +286,9 @@
     "inputs": [
       {
         "name": "requestId",
-        "type": "string",
+        "type": "uint256",
         "indexed": false,
-        "internalType": "string"
+        "internalType": "uint256"
       },
       {
         "name": "round",

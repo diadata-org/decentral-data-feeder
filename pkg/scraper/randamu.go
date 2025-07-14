@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"strconv"
 
@@ -51,14 +52,14 @@ type RandamuResponse struct {
 // Type 0
 type RandamuBytesRequest struct {
 	// request parameters for array of random bytes
-	RequestID string
+	RequestID *big.Int
 	Seed      string
 	LenBytes  uint8
 	NumBytes  uint8
 }
 
 type RandamuBytesResponse struct {
-	RequestID  string          `json:"request_id"`
+	RequestID  *big.Int        `json:"request_id"`
 	Metadata   RandamuMetadata `json:"metadata"`
 	Randomness []string        `json:"randomness"`
 }
@@ -66,7 +67,7 @@ type RandamuBytesResponse struct {
 // Type 1
 type RandamuIntRangeRequest struct {
 	// request parameters for a range of ints with limits
-	RequestID string
+	RequestID *big.Int
 	Seed      string
 	Min       uint8
 	Max       uint8
@@ -74,7 +75,7 @@ type RandamuIntRangeRequest struct {
 }
 
 type RandamuIntRangeResponse struct {
-	RequestID string          `json:"request_id"`
+	RequestID *big.Int        `json:"request_id"`
 	Metadata  RandamuMetadata `json:"metadata"`
 	Ints      []string        `json:"randomness"`
 }
@@ -82,14 +83,14 @@ type RandamuIntRangeResponse struct {
 // Type 2
 type RandamuIntRequest struct {
 	// request parameters for array of random ints
-	RequestID string
+	RequestID *big.Int
 	Seed      string
 	BitSize   uint8
 	NumInts   uint8
 }
 
 type RandamuIntResponse struct {
-	RequestID string          `json:"request_id"`
+	RequestID *big.Int        `json:"request_id"`
 	Metadata  RandamuMetadata `json:"metadata"`
 	Ints      []string        `json:"randomness"`
 }
@@ -101,7 +102,7 @@ func NewRandamuScraper() *RandamuScraper {
 	scraper.dataChannel = make(chan []byte)
 	scraper.requestChannel = make(chan []byte)
 	scraper.updateDoneChannel = make(chan bool)
-	scraper.requestorContract = utils.Getenv("REQUESTOR_CONTRACT", "0xB27386dE97c6940929Ce0F3D06E396bD36A7e027")
+	scraper.requestorContract = utils.Getenv("REQUESTOR_CONTRACT", "0x3E02966F02b51f395F296E308A301076CfEd0930")
 	restClient, err := ethclient.Dial(utils.Getenv("LUMINA_REST_CLIENT", ""))
 	if err != nil {
 		log.Fatal("get lumina rest client: ", err)
@@ -234,7 +235,7 @@ func (scraper *RandamuScraper) processRequestEvent(requestEvent *requestor.VRFRe
 	var requestInt RandamuIntRequest
 	requestInt.BitSize = 64
 	requestInt.NumInts = uint8(requestEvent.NumOfValues.Int64())
-	requestInt.RequestID = requestEvent.RequestId.String()
+	requestInt.RequestID = requestEvent.RequestId
 	requestInt.Seed = requestEvent.Seed
 	requestBody, err := json.Marshal(requestInt)
 	if err != nil {
