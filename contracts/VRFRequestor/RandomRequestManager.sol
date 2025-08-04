@@ -13,6 +13,7 @@ contract RandomRequestManager {
 
     uint256 public counter;
     mapping(uint256 => Request) public requests;
+    mapping(uint256 => int256[]) public randomness;
 
     struct Request {
         string seed;
@@ -37,5 +38,13 @@ contract RandomRequestManager {
         emit RequestReceived(requestId, seed, numOfValues);
 
         return requestId;
+    }
+
+    function fulfillRandomInt(
+        uint256 requestId, 
+        int256[] calldata randomInts
+    ) external {
+        // Implement your logic here. E.g.
+        randomness[requestId] = randomInts;
     }
 }
