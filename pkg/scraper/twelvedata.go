@@ -10,12 +10,15 @@ import (
 )
 
 const (
-	TWELVEDATA = "TwelveData"
+	TWELVEDATA                  = "TwelveData"
+	DIA_TICKER_SEPARATOR        = "-"
+	TWELVEDATA_TICKER_SEPARATOR = "/"
 )
 
 var (
 	twelvedataUpdateSeconds int64
 	twelvedataApiBaseString = "https://api.twelvedata.com/"
+	diadataApiBaseString    = "https://api.diadata.org/v1/"
 )
 
 type twelvedataAPIFXResponse struct {
@@ -37,10 +40,10 @@ type twelvedataQuoteResponse struct {
 }
 
 type TwelvedataQuote struct {
-	Symbol   string
-	Name     string
-	Price    float64
-	Time     time.Time
+	Symbol   string    `json:"Ticker"`
+	Name     string    `json:"Name"`
+	Price    float64   `json:"Price"`
+	Time     time.Time `json:"Timestamp"`
 	DataType string
 	Source   string
 }
@@ -70,8 +73,8 @@ func NewTwelvedataScraper() *TwelvedataScraper {
 	s := &TwelvedataScraper{
 		ticker:                 time.NewTicker(time.Duration(twelvedataUpdateSeconds) * time.Second),
 		twelvedataStockSymbols: strings.Split(utils.Getenv("STOCK_SYMBOLS", "AAPL,MSFT,NVDA,AMZN,GOOG,META,TSLA,WMT,JPM,V"), ","),
-		twelvedataFXTickers:    strings.Split(utils.Getenv("FX_TICKERS", "USD/EUR,USD/GBP,USD/CHF,USD/JPY"), ","),
-		twelvedataCommodities:  strings.Split(utils.Getenv("COMMODITIES", ""), ","),
+		twelvedataFXTickers:    strings.Split(utils.Getenv("FX_TICKERS", "USD-EUR,USD-GBP,USD-CHF,USD-JPY"), ","),
+		twelvedataCommodities:  strings.Split(utils.Getenv("COMMODITIES", "XAU-USD"), ","),
 		twelvedataETFs:         strings.Split(utils.Getenv("ETF", ""), ","),
 		apiKey:                 utils.Getenv("TWELVEDATA_API_KEY", ""),
 	}
@@ -131,22 +134,25 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			if symbol == "" {
 				continue
 			}
-			quotation, err := scraper.getTwelveStockPrice(symbol)
-			if err != nil {
-				log.Error("getTwelveStockPrice: ", err)
-			}
-			price, err := strconv.ParseFloat(quotation.Price, 64)
-			if err != nil {
-				log.Error("Parse Float for: ", symbol)
-			}
 
-			quote := TwelvedataQuote{
-				Symbol:   symbol,
-				Price:    price,
-				Time:     time.Now(),
-				Source:   TWELVEDATA,
-				DataType: "Stock",
+			quote, err := getRwaQuoteFromDia(symbol, "Equities")
+			// Fetch data from twelvedata API in case diadata API fails and a twelvedata api key was provided.
+			if err != nil && scraper.apiKey != "" {
+				log.Warn("")
+				quotation, err := scraper.getTwelveStockPrice(symbol)
+				if err != nil {
+					log.Error("getTwelveStockPrice: ", err)
+				}
+				price, err := strconv.ParseFloat(quotation.Price, 64)
+				if err != nil {
+					log.Error("Parse Float for: ", symbol)
+				}
+				quote.Symbol = symbol
+				quote.Price = price
+				quote.Time = time.Now()
 			}
+			quote.Source = TWELVEDATA
+			quote.DataType = "Equities"
 
 			quoteBytes, err := json.Marshal(quote)
 			if err != nil {
@@ -163,18 +169,21 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		if ticker == "" {
 			continue
 		}
-		quotation, err := scraper.getTwelveFXData(ticker)
-		if err != nil {
-			log.Error("getTwelveFXData: ", err)
-		}
 
-		quote := TwelvedataQuote{
-			Symbol:   ticker,
-			Price:    quotation.Rate,
-			Time:     time.Unix(quotation.Timestamp, 0),
-			Source:   TWELVEDATA,
-			DataType: "FX",
+		quote, err := getRwaQuoteFromDia(ticker, "Fiat")
+		if err != nil && scraper.apiKey != "" {
+			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
+			quotation, err := scraper.getTwelveFXData(ticker)
+			if err != nil {
+				log.Error("getTwelveFXData: ", err)
+			}
+			quote.Symbol = ticker
+			quote.Price = quotation.Rate
+			quote.Time = time.Unix(quotation.Timestamp, 0)
 		}
+		quote.Source = TWELVEDATA
+		quote.DataType = "Fiat"
+
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
 			log.Error("marshal fx data: ", err)
@@ -188,24 +197,29 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		if ticker == "" {
 			continue
 		}
-		quotation, err := scraper.getTwelveQuote(ticker)
-		if err != nil {
-			log.Error("getTwelveFXData: ", err)
-		}
 
-		price, err := strconv.ParseFloat(quotation.Price, 64)
-		if err != nil {
-			log.Errorf("parse price for %s", quotation.Symbol)
-		}
+		quote, err := getRwaQuoteFromDia(ticker, "Commodities")
+		if err != nil && scraper.apiKey != "" {
+			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
+			quotation, err := scraper.getTwelveQuote(ticker)
+			if err != nil {
+				log.Error("getTwelveCommoditiesData: ", err)
+			}
 
-		quote := TwelvedataQuote{
-			Symbol:   ticker,
-			Name:     quotation.Name,
-			Price:    price,
-			Time:     time.Unix(quotation.Timestamp, 0),
-			Source:   TWELVEDATA,
-			DataType: "Commodity",
+			price, err := strconv.ParseFloat(quotation.Price, 64)
+			if err != nil {
+				log.Errorf("parse price for %s", quotation.Symbol)
+			}
+			quote = TwelvedataQuote{
+				Symbol: ticker,
+				Price:  price,
+				Time:   time.Unix(quotation.Timestamp, 0),
+				Name:   quotation.Name,
+			}
 		}
+		quote.Source = TWELVEDATA
+		quote.DataType = "Commodities"
+
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
 			log.Error("marshal commodities data: ", err)
@@ -218,24 +232,29 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		if ticker == "" {
 			continue
 		}
-		quotation, err := scraper.getTwelveQuote(ticker)
-		if err != nil {
-			log.Error("getTwelveFXData: ", err)
-		}
 
-		price, err := strconv.ParseFloat(quotation.Price, 64)
-		if err != nil {
-			log.Errorf("parse price for %s", quotation.Symbol)
-		}
+		quote, err := getRwaQuoteFromDia(ticker, "ETF")
+		if err != nil && scraper.apiKey != "" {
+			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
+			quotation, err := scraper.getTwelveQuote(ticker)
+			if err != nil {
+				log.Error("getTwelveFXData: ", err)
+			}
 
-		quote := TwelvedataQuote{
-			Symbol:   ticker,
-			Name:     quotation.Name,
-			Price:    price,
-			Time:     time.Unix(quotation.Timestamp, 0),
-			Source:   TWELVEDATA,
-			DataType: "ETF",
+			price, err := strconv.ParseFloat(quotation.Price, 64)
+			if err != nil {
+				log.Errorf("parse price for %s", quotation.Symbol)
+			}
+			quote = TwelvedataQuote{
+				Symbol: ticker,
+				Name:   quotation.Name,
+				Price:  price,
+				Time:   time.Unix(quotation.Timestamp, 0),
+			}
 		}
+		quote.Source = TWELVEDATA
+		quote.DataType = "ETF"
+
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
 			log.Error("marshal etf data: ", err)
@@ -249,6 +268,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 func (scraper *TwelvedataScraper) getTwelveFXData(symbol string) (fxRate twelvedataAPIFXResponse, err error) {
 	var response []byte
+
+	// Twelvedata api takes "/" as separator instead of "-".
+	symbols := strings.Split(symbol, DIA_TICKER_SEPARATOR)
+	if len(symbols) == 2 {
+		symbol = symbols[0] + TWELVEDATA_TICKER_SEPARATOR + symbols[1]
+	}
 
 	apiURL := twelvedataApiBaseString + "exchange_rate?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	response, _, err = utils.GetRequest(apiURL)
@@ -276,6 +301,10 @@ func (scraper *TwelvedataScraper) getTwelveStockPrice(symbol string) (stockPrice
 func (scraper *TwelvedataScraper) getTwelveQuote(symbol string) (commodity twelvedataQuoteResponse, err error) {
 	var response []byte
 
+	symbols := strings.Split(symbol, DIA_TICKER_SEPARATOR)
+	if len(symbols) == 2 {
+		symbol = symbols[0] + TWELVEDATA_TICKER_SEPARATOR + symbols[1]
+	}
 	apiURL := twelvedataApiBaseString + "quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {
@@ -284,6 +313,18 @@ func (scraper *TwelvedataScraper) getTwelveQuote(symbol string) (commodity twelv
 
 	err = json.Unmarshal(response, &commodity)
 	return
+}
+
+func getRwaQuoteFromDia(symbol string, assetType string) (tq TwelvedataQuote, err error) {
+
+	url := diadataApiBaseString + "rwa/" + assetType + "/" + symbol
+	response, _, err := utils.GetRequest(url)
+	if err != nil {
+		return
+	}
+	err = json.Unmarshal(response, &tq)
+	return
+
 }
 
 func (scraper *TwelvedataScraper) DataChannel() chan []byte {
