@@ -1,0 +1,7 @@
+services:
+  app:
+    image: ${IMAGE_TAG}
+    # for latest image versions see IBM Container Registry
+    env_file:
+      - .env
+    restart: always

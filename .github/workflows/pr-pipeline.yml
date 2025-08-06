@@ -1,0 +1,83 @@
+name: decentral-data-feeder-pull-request-pipeline
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:  # This allows manual triggering
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  ACTIONS_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG }}  # Set debug mode globally
+
+jobs:
+  lint_build_and_push:
+    runs-on: ubuntu-latest
+    environment:
+      name: dia-testspace
+    steps:
+      # Checkout decentral-data-feeder repo
+      - uses: actions/checkout@v4
+
+      # Set up Go
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      # Get Short Commit Hash of the Merge Commit
+      - name: Get Short Commit Hash
+        run: |
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+
+      # Go module download and verify
+      - name: Download Go modules
+        run: |
+          go mod download
+          go mod verify
+
+      # Run Go linting and formatting
+      - name: Run Go linting
+        run: |
+          go fmt ./...
+          go vet ./...
+
+      # Run Go build to ensure compilation works
+      - name: Build Go application
+        run: |
+          go build -v ./...
+
+      # Install IBM Cloud CLI and Container Registry CLI
+      - name: Install IBM Cloud CLI
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud plugin install container-registry -f
+
+      # Log in to IBM Cloud
+      - name: Log in to IBM Cloud
+        env:
+          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+        run: |
+          ibmcloud login --apikey $IBM_CLOUD_API_KEY --no-region
+          ibmcloud target -r us-south
+          ibmcloud target -g Default
+
+      # Build and Tag the Docker image with the commit hash
+      - name: Build and Tag Docker image
+        run: |
+          docker build -f build/Dockerfile-luminaDataFeeder -t us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }} .
+
+      # Push Docker image to IBM Cloud Container Registry
+      - name: Push Docker image
+        run: |
+          ibmcloud cr login
+          docker push us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }}
+
+      # Cleanup and log out from IBM
+      - name: Cleanup and log out from IBM
+        run: |
+          ibmcloud logout
