@@ -55,6 +55,29 @@ func OracleUpdateExecutor(
 					log.Error("Unmarshal Twelvedata response: ", err)
 					continue
 				}
+
+				if twelvedataResponse.DataType == "NyseHoliday" {
+
+				}
+
+				if twelvedataResponse.DataType == "NyseOpen" {
+					// business time.
+					keys = append(keys, "NYSE_Open")
+					nyseOpen := int64(0)
+					if twelvedataResponse.NYSEOpen {
+						nyseOpen = int64(1)
+					}
+					values = append(values, nyseOpen)
+
+					// holiday.
+					keys = append(keys, "NYSE_Holiday")
+					nyseHoliday := int64(0)
+					if twelvedataResponse.NYSEHoliday {
+						nyseHoliday = int64(1)
+					}
+					values = append(values, nyseHoliday)
+				}
+
 				log.Info("got twelvedata data: ", twelvedataResponse)
 				keys = append(keys, twelvedataResponse.Symbol)
 				values = append(values, int64(twelvedataResponse.Price*1e5))
@@ -133,7 +156,6 @@ func OracleUpdateExecutor(
 
 func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, auth *bind.TransactOpts, data any) error {
 	var gasPrice *big.Int
-
 	switch data := data.(type) {
 	case scraper.RandamuBytesResponse:
 		tx, err := contract.SetBytes(&bind.TransactOpts{

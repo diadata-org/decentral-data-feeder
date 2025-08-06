@@ -1,6 +1,6 @@
 module github.com/diadata-org/decentral-data-feeder
 
-go 1.23
+go 1.23.0
 
 toolchain go1.23.4
 
@@ -28,6 +28,7 @@ require (
 	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/holiman/uint256 v1.3.1 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
+	github.com/scmhub/calendar v0.0.0-20250305134741-bdfe49f3f914
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/supranational/blst v0.3.13 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
@@ -44,5 +45,3 @@ require (
 )
 
 replace github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
-
-replace github.com/diadata-org/decentral-data-feeder => /home/philipp/go/src/github.com/diadata-org/decentral-data-feeder/pkg/onchain

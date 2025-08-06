@@ -7,6 +7,7 @@ import (
 	"time"
 
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
+	calendar "github.com/scmhub/calendar"
 )
 
 const (
@@ -40,12 +41,14 @@ type twelvedataQuoteResponse struct {
 }
 
 type TwelvedataQuote struct {
-	Symbol   string    `json:"Ticker"`
-	Name     string    `json:"Name"`
-	Price    float64   `json:"Price"`
-	Time     time.Time `json:"Timestamp"`
-	DataType string
-	Source   string
+	Symbol      string    `json:"Ticker"`
+	Name        string    `json:"Name"`
+	Price       float64   `json:"Price"`
+	Time        time.Time `json:"Timestamp"`
+	NYSEHoliday bool      `json:"Nyse_Holiday"`
+	NYSEOpen    bool      `json:"Nyse_Open"`
+	DataType    string
+	Source      string
 }
 
 type TwelvedataScraper struct {
@@ -113,11 +116,15 @@ func (scraper *TwelvedataScraper) mainLoop() {
 // Update retrieves new coin information from the twelvedata API and stores it to influx
 func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
-	marketTime, err := isMarketTime()
+	nyseHoliday, marketTime, err := isMarketTime()
 	if err != nil {
 		log.Error("isMarketOpen: ", err)
 	}
-	if marketTime {
+	if nyseHoliday {
+		scraper.twelvedataStockMarketOpen = false
+	}
+
+	if !nyseHoliday && marketTime {
 		// Check if markets are open.
 		quote, err := scraper.getTwelveQuote("AAPL")
 		if err != nil {
@@ -127,6 +134,18 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 	} else {
 		scraper.twelvedataStockMarketOpen = false
 	}
+
+	// Send information on nyse open or closed.
+	var quoteOpen TwelvedataQuote
+	quoteOpen.DataType = "NyseOpen"
+	quoteOpen.NYSEHoliday = nyseHoliday
+	quoteOpen.NYSEOpen = marketTime
+	quoteOpen.Time = time.Now()
+	quoteBytes, err := json.Marshal(quoteOpen)
+	if err != nil {
+		log.Error("marshal stock data: ", err)
+	}
+	scraper.dataChannel <- quoteBytes
 
 	if scraper.twelvedataStockMarketOpen {
 		log.Infof("Executing stock data update for %v symbols", getNumSymbols(scraper.twelvedataStockSymbols))
@@ -339,18 +358,26 @@ func (scraper *TwelvedataScraper) Close() error {
 	return nil
 }
 
-func isMarketTime() (bool, error) {
+func isMarketTime() (holiday bool, marketTime bool, err error) {
+	// New Yorck stock exchange calendar.
+	nyse := calendar.XNYS()
+
+	if nyse.IsHoliday(time.Now()) {
+		holiday = true
+		return
+	}
+
 	// Load the America/New_York location (EST/EDT with daylight saving)
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		return false, err
+		return
 	}
 	now := time.Now().In(loc)
 
 	openTime := time.Date(now.Year(), now.Month(), now.Day(), 8, 50, 0, 0, loc)
 	closeTime := time.Date(now.Year(), now.Month(), now.Day(), 16, 10, 0, 0, loc)
 
-	return now.After(openTime) && now.Before(closeTime), nil
+	return false, now.After(openTime) && now.Before(closeTime), nil
 }
 
 func getNumSymbols(symbols []string) int {
