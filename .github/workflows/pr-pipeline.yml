@@ -77,60 +77,60 @@ jobs:
           ibmcloud cr login
           docker push us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }}
 
-      # # Checkout the lumina-infra repository
-      # - name: Checkout lumina-infra repository
-      #   env:
-      #     LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
-      #   run: |
-      #     rm -rf lumina-infra
-      #     git clone -q https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra lumina-infra
+      # Checkout the lumina-infra repository
+      - name: Checkout lumina-infra repository
+        env:
+          LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
+        run: |
+          rm -rf lumina-infra
+          git clone -q https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra lumina-infra
 
-      # # Install kubectl
-      # - name: Install kubectl
-      #   run: |
-      #     curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
-      #     chmod +x ./kubectl
-      #     sudo mv ./kubectl /usr/local/bin/kubectl
+      # Install kubectl
+      - name: Install kubectl
+        run: |
+          curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x ./kubectl
+          sudo mv ./kubectl /usr/local/bin/kubectl
 
-      # - name: IBM Cluster kubectl config 
-      #   env:
-      #     TOKEN: ${{ secrets.K8S_SERVICE_ACCOUNT_TOKEN_PROD }}
-      #     CLUSTER_NAME: ${{ secrets.K8s_CLUSTER_NAME_IBM }}
-      #     CONTEXT: ${{ secrets.K8s_CONTEXT_IBM }}
-      #     API_SERVER:  ${{ secrets.K8S_API_SERVER_IBM }} 
-      #     KUBE_CA_CERT_BASE64: ${{ secrets.KUBE_CA_CERT_BASE64_IBM }}
-      #     SERVICE_ACCOUNT: ${{ secrets.K8S_SA }}
-      #   run: |
-      #     # Ensure token does not contain unexpected newline characters
-      #     TOKEN=$(echo "$TOKEN" | tr -d '\n')
-      #     # Decode the base64-encoded CA certificate and save it to a file
-      #     echo "$KUBE_CA_CERT_BASE64" | base64 --decode > /tmp/ca.pem
-      #     # Set cluster using the CA PEM file
-      #     kubectl config set-cluster "$CLUSTER_NAME" \
-      #       --server="$API_SERVER" \
-      #       --certificate-authority=/tmp/ca.pem
-      #     # Set credentials
-      #     kubectl config set-credentials $SERVICE_ACCOUNT --token="$TOKEN"
-      #     # Set context
-      #     kubectl config set-context $CONTEXT --cluster="$CLUSTER_NAME" --user=$SERVICE_ACCOUNT 
-      #     # Use context
-      #     kubectl config use-context $CONTEXT
+      - name: IBM Cluster kubectl config 
+        env:
+          TOKEN: ${{ secrets.K8S_SERVICE_ACCOUNT_TOKEN_PROD }}
+          CLUSTER_NAME: ${{ secrets.K8s_CLUSTER_NAME_IBM }}
+          CONTEXT: ${{ secrets.K8s_CONTEXT_IBM }}
+          API_SERVER:  ${{ secrets.K8S_API_SERVER_IBM }} 
+          KUBE_CA_CERT_BASE64: ${{ secrets.KUBE_CA_CERT_BASE64_IBM }}
+          SERVICE_ACCOUNT: ${{ secrets.K8S_SA }}
+        run: |
+          # Ensure token does not contain unexpected newline characters
+          TOKEN=$(echo "$TOKEN" | tr -d '\n')
+          # Decode the base64-encoded CA certificate and save it to a file
+          echo "$KUBE_CA_CERT_BASE64" | base64 --decode > /tmp/ca.pem
+          # Set cluster using the CA PEM file
+          kubectl config set-cluster "$CLUSTER_NAME" \
+            --server="$API_SERVER" \
+            --certificate-authority=/tmp/ca.pem
+          # Set credentials
+          kubectl config set-credentials $SERVICE_ACCOUNT --token="$TOKEN"
+          # Set context
+          kubectl config set-context $CONTEXT --cluster="$CLUSTER_NAME" --user=$SERVICE_ACCOUNT 
+          # Use context
+          kubectl config use-context $CONTEXT
 
-      # # Helm upgrade command for decentral-data-feeder
-      # - name: Helm upgrade/install decentral-data-feeder
-      #   run: |
-      #     cd lumina-infra/helmcharts/decentral-feeders/201-data-feeder-testnet-ibm
-      #     helm upgrade --install -n dia-lumina \
-      #       --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
-      #       201-data-feeder-testnet .
+      # Helm upgrade command for decentral-data-feeder
+      - name: Helm upgrade/install decentral-data-feeder
+        run: |
+          cd lumina-infra/helmcharts/data-feeders/twelvedata
+          helm upgrade --install -n dia-lumina \
+            --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
+            twelvedata-feeder .
           
-      #     # Clean up CA certificate 
-      #     if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
+          # Clean up CA certificate 
+          if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
 
-      # - name: Cleanup IBM Cluster CA Certificate
-      #   run: |
-      #     # Securely remove the CA certificate file
-      #     if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
+      - name: Cleanup IBM Cluster CA Certificate
+        run: |
+          # Securely remove the CA certificate file
+          if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
 
       # Cleanup the cloned repository and log out from IBM
       - name: Cleanup cloned repository and log out from IBM
