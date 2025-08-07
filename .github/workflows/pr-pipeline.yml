@@ -110,21 +110,19 @@ jobs:
             --server="$API_SERVER" \
             --certificate-authority=/tmp/ca.pem
           # Set credentials
-          kubectl config set-credentials "$SERVICE_ACCOUNT" --token="$TOKEN"
+          kubectl config set-credentials $SERVICE_ACCOUNT --token="$TOKEN"
           # Set context
-          kubectl config set-context "$CONTEXT" --cluster="$CLUSTER_NAME" --user="$SERVICE_ACCOUNT"
+          kubectl config set-context dia-cluster-dal/c1ebf5md0icveupf0t10 
           # Use context
-          kubectl config use-context "$CONTEXT"
-          # Test connection
-          kubectl cluster-info
+          kubectl config use-context dia-cluster-dal/c1ebf5md0icveupf0t10
 
       # Helm upgrade command for decentral-data-feeder
       - name: Helm upgrade/install decentral-data-feeder
         run: |
-          cd lumina-infra/helmcharts/data-feeders/twelvedata
+          cd lumina-infra/helmcharts/decentral-feeders/201-data-feeder-testnet-ibm
           helm upgrade --install -n dia-lumina \
             --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
-            twelvedata-feeder .
+            201-data-feeder-testnet .
           
           # Clean up CA certificate 
           if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
@@ -140,4 +138,3 @@ jobs:
           rm -rf lumina-infra
           ibmcloud logout
 
-          
