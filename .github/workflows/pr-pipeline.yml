@@ -69,13 +69,13 @@ jobs:
       # Build and Tag the Docker image with the commit hash
       - name: Build and Tag Docker image
         run: |
-          docker build -f build/Dockerfile-luminaDataFeeder -t us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }} .
+          docker build -f build/Dockerfile-luminaDataFeeder -t us.icr.io/dia-registry/oracles/data-feeder-twelvedata:commit-hash-${{ env.COMMIT_HASH }} .
 
       # Push Docker image to IBM Cloud Container Registry
       - name: Push Docker image
         run: |
           ibmcloud cr login
-          docker push us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }}
+          docker push us.icr.io/dia-registry/oracles/data-feeder-twelvedata:commit-hash-${{ env.COMMIT_HASH }}
 
       # Checkout the lumina-infra repository
       - name: Checkout lumina-infra repository
@@ -119,10 +119,10 @@ jobs:
       # Helm upgrade command for decentral-data-feeder
       - name: Helm upgrade/install decentral-data-feeder
         run: |
-          cd lumina-infra/helmcharts/decentral-feeders/201-data-feeder-testnet-ibm
+          cd lumina-infra/helmcharts/data-feeders/twelvedata
           helm upgrade --install -n dia-lumina \
             --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
-            201-data-feeder-testnet .
+            201-data-feeder-twelvedata-testnet .
           
           # Clean up CA certificate 
           if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
