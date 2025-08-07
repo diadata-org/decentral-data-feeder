@@ -99,7 +99,7 @@ jobs:
           CONTEXT: ${{ secrets.K8s_CONTEXT_IBM }}
           API_SERVER:  ${{ secrets.K8S_API_SERVER_IBM }} 
           KUBE_CA_CERT_BASE64: ${{ secrets.KUBE_CA_CERT_BASE64_IBM }}
-          SERVICE_ACCOUNT: github-actions-sa
+          SERVICE_ACCOUNT: ${{ secrets.K8S_SA }}
         run: |
           # Ensure token does not contain unexpected newline characters
           TOKEN=$(echo "$TOKEN" | tr -d '\n')
