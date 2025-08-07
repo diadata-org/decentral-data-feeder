@@ -115,6 +115,8 @@ jobs:
           kubectl config set-context "$CONTEXT" --cluster="$CLUSTER_NAME" --user="$SERVICE_ACCOUNT"
           # Use context
           kubectl config use-context "$CONTEXT"
+          # Verify connection
+          kubectl cluster-info
 
       # Helm upgrade command for decentral-data-feeder
       - name: Helm upgrade/install decentral-data-feeder
