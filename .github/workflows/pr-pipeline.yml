@@ -121,7 +121,11 @@ jobs:
 
       # Helm upgrade command for decentral-data-feeder
       - name: Helm upgrade/install decentral-data-feeder
+        env:
+          KUBECONFIG: /home/runner/.kube/config
         run: |
+          # Test kubectl access first
+          kubectl get ns dia-lumina
           cd lumina-infra/helmcharts/data-feeders/twelvedata
           helm upgrade --install -n dia-lumina \
             --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
