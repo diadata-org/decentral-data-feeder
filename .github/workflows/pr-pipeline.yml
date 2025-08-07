@@ -116,8 +116,8 @@ jobs:
           kubectl config set-context "$CONTEXT" --cluster="$CLUSTER_NAME" --user="$SERVICE_ACCOUNT"
           # Use context
           kubectl config use-context "$CONTEXT"
-          # Test basic kubectl access
-          kubectl auth can-i get pods -n dia-lumina
+          # Debug: Show kubectl config
+          kubectl config view --raw --minify
 
       # Helm upgrade command for decentral-data-feeder
       - name: Helm upgrade/install decentral-data-feeder
