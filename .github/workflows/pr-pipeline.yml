@@ -103,7 +103,6 @@ jobs:
         run: |
           # Ensure token does not contain unexpected newline characters
           TOKEN=$(echo "$TOKEN" | tr -d '\n')
-          echo "Token length: ${#TOKEN}"
           # Decode the base64-encoded CA certificate and save it to a file
           echo "$KUBE_CA_CERT_BASE64" | base64 --decode > /tmp/ca.pem
           # Set cluster using the CA PEM file
@@ -111,13 +110,11 @@ jobs:
             --server="$API_SERVER" \
             --certificate-authority=/tmp/ca.pem
           # Set credentials
-          kubectl config set-credentials "$SERVICE_ACCOUNT" --token="$TOKEN"
+          kubectl config set-credentials $SERVICE_ACCOUNT --token="$TOKEN"
           # Set context
-          kubectl config set-context "$CONTEXT" --cluster="$CLUSTER_NAME" --user="$SERVICE_ACCOUNT"
+          kubectl config set-context $CONTEXT --cluster="$CLUSTER_NAME" --user=$SERVICE_ACCOUNT 
           # Use context
-          kubectl config use-context "$CONTEXT"
-          # Debug: Show kubectl config
-          kubectl config view --raw --minify
+          kubectl config use-context $CONTEXT
 
       # Helm upgrade command for decentral-data-feeder
       - name: Helm upgrade/install decentral-data-feeder
