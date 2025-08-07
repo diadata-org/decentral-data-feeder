@@ -126,9 +126,6 @@ jobs:
           helm upgrade --install -n dia-lumina \
             --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
             201-data-feeder-twelvedata-testnet .
-          
-          # Clean up CA certificate 
-          if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
 
       - name: Cleanup IBM Cluster CA Certificate
         run: |
