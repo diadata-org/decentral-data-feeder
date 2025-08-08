@@ -56,10 +56,6 @@ func OracleUpdateExecutor(
 					continue
 				}
 
-				if twelvedataResponse.DataType == "NyseHoliday" {
-
-				}
-
 				if twelvedataResponse.DataType == "NyseOpen" {
 					// business time.
 					keys = append(keys, "NYSE_Open")
@@ -137,8 +133,8 @@ func OracleUpdateExecutor(
 			// update oracle with collected keys and values.
 			log.Infof("collected %v responses. make oracle update...", len(values))
 			switch contract := contractAny.(type) {
-			case diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
-				err := updateOracleMultiValues(contract, auth, keys, values, time.Now().Unix())
+			case *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
+				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix())
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
 					return
