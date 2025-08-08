@@ -94,6 +94,7 @@ func OracleUpdateExecutor(
 					if err != nil {
 						log.Errorf("Unmarshal Randamu random bytes: %v.", err)
 					}
+					randomBytes.RequestID = randamuResponse.RequestId
 
 					err = updateRandomnessOracle(*contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomBytes)
 					if err != nil {
@@ -106,6 +107,7 @@ func OracleUpdateExecutor(
 					if err != nil {
 						log.Errorf("Unmarshal Randamu random intRange: %v.", err)
 					}
+					randomIntRange.RequestID = randamuResponse.RequestId
 
 					err = updateRandomnessOracle(*contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomIntRange)
 					if err != nil {
@@ -118,6 +120,10 @@ func OracleUpdateExecutor(
 					if err != nil {
 						log.Errorf("Unmarshal Randamu random ints: %v.", err)
 					}
+					randomInts.RequestID = randamuResponse.RequestId
+
+					log.Info("obtained random Ints: ", randomInts.Ints)
+					log.Infof("requestID -- round -- seed -- signature: %s -- %v -- %s -- %s", randomInts.RequestID.String(), randomInts.Metadata.Round, randomInts.Metadata.Seed, randomInts.Metadata.Signature)
 
 					err = updateRandomnessOracle(*contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomInts)
 					if err != nil {
@@ -196,6 +202,7 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 		logTx(tx)
 
 	case scraper.RandamuIntResponse:
+		log.Info("update oracle with IntResponse")
 		var bigInts []*big.Int
 		for _, i := range data.Ints {
 			i64, err := strconv.ParseInt(i, 10, 64)

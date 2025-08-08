@@ -12,7 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 
-	requestor "github.com/diadata-org/decentral-data-feeder/contracts/VRFRequestor"
+	requestor "github.com/diadata-org/decentral-data-feeder/contracts/RandomRequestManager"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -24,13 +24,12 @@ const (
 )
 
 type RandamuScraper struct {
-	apiKey            string
-	requestChannel    chan []byte
-	dataChannel       chan []byte
-	updateDoneChannel chan bool
-	requestorContract string
-	restClient        *ethclient.Client
-	wsClient          *ethclient.Client
+	apiKey                 string
+	requestChannel         chan []byte
+	dataChannel            chan []byte
+	updateDoneChannel      chan bool
+	requestorContract      string
+	wsClientRequestorChain *ethclient.Client
 }
 
 type RandamuMetadata struct {
@@ -45,8 +44,9 @@ type RandamuRequest struct {
 }
 
 type RandamuResponse struct {
-	Type     int
-	Response []byte
+	Type      int
+	RequestId *big.Int
+	Response  []byte
 }
 
 // Type 0
@@ -102,100 +102,31 @@ func NewRandamuScraper() *RandamuScraper {
 	scraper.dataChannel = make(chan []byte)
 	scraper.requestChannel = make(chan []byte)
 	scraper.updateDoneChannel = make(chan bool)
-	scraper.requestorContract = utils.Getenv("REQUESTOR_CONTRACT", "0x3E02966F02b51f395F296E308A301076CfEd0930")
-	restClient, err := ethclient.Dial(utils.Getenv("LUMINA_REST_CLIENT", ""))
+	scraper.requestorContract = utils.Getenv("REQUESTOR_CONTRACT", "")
+
+	wsClient, err := ethclient.Dial(utils.Getenv("WS_CLIENT_REQUESTOR_CHAIN", ""))
 	if err != nil {
-		log.Fatal("get lumina rest client: ", err)
+		log.Fatal("get ws client for requestor chain: ", err)
 	}
-	wsClient, err := ethclient.Dial(utils.Getenv("LUMINA_WS_CLIENT", ""))
-	if err != nil {
-		log.Fatal("get lumina ws client: ", err)
-	}
-	scraper.restClient = restClient
-	scraper.wsClient = wsClient
+
+	scraper.wsClientRequestorChain = wsClient
 
 	go scraper.listen()
-
-	// // // Test IntRequest ------------------------------------------------------
-	// var requestInt RandamuIntRequest
-	// requestInt.BitSize = uint8(8)
-	// requestInt.NumInts = uint8(10)
-	// requestInt.RequestID = "testID"
-	// requestBody, err := json.Marshal(requestInt)
-	// if err != nil {
-	// 	log.Error("marshal requestInt: ", err)
-	// }
-	// var request RandamuRequest
-	// request.Body = requestBody
-	// request.Type = 2
-	// requestByte, err := json.Marshal(request)
-	// if err != nil {
-	// 	log.Error("marshal request: ", err)
-	// }
-
-	// scraper.requestChannel <- requestByte
-	// // Test ----------------------------------------------------------------
-
-	// // Test ByteRequest ------------------------------------------------------
-	// var requestByte RandamuBytesRequest
-	// requestByte.LenBytes = uint8(10)
-	// requestByte.NumBytes = uint8(4)
-	// requestByte.RequestID = "testID"
-	// requestBody, err := json.Marshal(requestByte)
-	// if err != nil {
-	// 	log.Error("marshal requestInt: ", err)
-	// }
-	// var request RandamuRequest
-	// request.Body = requestBody
-	// request.Type = 0
-	// requestMarshalled, err := json.Marshal(request)
-	// if err != nil {
-	// 	log.Error("marshal request: ", err)
-	// }
-
-	// scraper.requestChannel <- requestMarshalled
-	// // Test ----------------------------------------------------------------
-
-	// Test IntRangeRequest ------------------------------------------------------
-	// testTicker := time.NewTicker(time.Duration(10 * time.Second))
-	// go func() {
-	// 	for range testTicker.C {
-	// 		var requestIntRange RandamuIntRangeRequest
-	// 		requestIntRange.Min = uint8(2)
-	// 		requestIntRange.Max = uint8(10)
-	// 		requestIntRange.NumInts = uint8(4)
-	// 		requestIntRange.RequestID = "testID"
-	// 		requestBody, err := json.Marshal(requestIntRange)
-	// 		if err != nil {
-	// 			log.Error("marshal requestInt: ", err)
-	// 		}
-	// 		var request RandamuRequest
-	// 		request.Body = requestBody
-	// 		request.Type = 1
-	// 		requestMarshalled, err := json.Marshal(request)
-	// 		if err != nil {
-	// 			log.Error("marshal request: ", err)
-	// 		}
-
-	// 		scraper.requestChannel <- requestMarshalled
-	// 	}
-	// }()
-	// Test ----------------------------------------------------------------
 
 	return &scraper
 }
 
 func (scraper *RandamuScraper) listen() {
 
-	// TO DO: Listen to requests from requestor.
+	// Listen to request events from requestor.
 	log.Info("listen")
-	requestFilterer, err := requestor.NewVRFRequestorFilterer(common.HexToAddress(scraper.requestorContract), scraper.wsClient)
+	requestFilterer, err := requestor.NewRandomRequestManagerFilterer(common.HexToAddress(scraper.requestorContract), scraper.wsClientRequestorChain)
 	if err != nil {
 		log.Error("NewVRFRequestorFilterer: ", err)
 		return
 	}
 
-	requestSink := make(chan *requestor.VRFRequestorRequestReceived)
+	requestSink := make(chan *requestor.RandomRequestManagerRequestReceived)
 	sub, err := requestFilterer.WatchRequestReceived(&bind.WatchOpts{}, requestSink, nil)
 	if err != nil {
 		log.Error("WatchRequestReceived: ", err)
@@ -225,10 +156,10 @@ func (scraper *RandamuScraper) listen() {
 
 }
 
-func (scraper *RandamuScraper) processRequestEvent(requestEvent *requestor.VRFRequestorRequestReceived) ([]byte, error) {
+func (scraper *RandamuScraper) processRequestEvent(requestEvent *requestor.RandomRequestManagerRequestReceived) ([]byte, error) {
 	var randamuRequest RandamuRequest
 
-	// For the MVP we're currently restricted to int arrays.
+	// !! For the MVP we're currently restricted to int arrays. !!
 	randamuRequest.Type = 2
 
 	// Fill request types and marshal them.
@@ -237,11 +168,14 @@ func (scraper *RandamuScraper) processRequestEvent(requestEvent *requestor.VRFRe
 	requestInt.NumInts = uint8(requestEvent.NumOfValues.Int64())
 	requestInt.RequestID = requestEvent.RequestId
 	requestInt.Seed = requestEvent.Seed
+
 	requestBody, err := json.Marshal(requestInt)
 	if err != nil {
 		log.Error("marshal requestInt: ", err)
 	}
+
 	randamuRequest.Body = requestBody
+
 	requestByte, err := json.Marshal(randamuRequest)
 	if err != nil {
 		log.Error("marshal request: ", err)
@@ -254,10 +188,12 @@ func (scraper *RandamuScraper) processRequestEvent(requestEvent *requestor.VRFRe
 
 func (scraper *RandamuScraper) requestData(requestBytes []byte) ([]byte, error) {
 	var request RandamuRequest
+
 	err := json.Unmarshal(requestBytes, &request)
 	if err != nil {
 		return []byte{}, err
 	}
+
 	switch request.Type {
 	case 0:
 		var randomBytesRequest RandamuBytesRequest
@@ -273,6 +209,7 @@ func (scraper *RandamuScraper) requestData(requestBytes []byte) ([]byte, error) 
 		// make response struct
 		var resp RandamuResponse
 		resp.Type = request.Type
+		resp.RequestId = randomBytesRequest.RequestID
 		resp.Response = randomBytes
 
 		return json.Marshal(resp)
@@ -291,6 +228,7 @@ func (scraper *RandamuScraper) requestData(requestBytes []byte) ([]byte, error) 
 		// make response struct
 		var resp RandamuResponse
 		resp.Type = request.Type
+		resp.RequestId = intRangeRequest.RequestID
 		resp.Response = randomIntRange
 
 		return json.Marshal(resp)
@@ -309,6 +247,7 @@ func (scraper *RandamuScraper) requestData(requestBytes []byte) ([]byte, error) 
 		// make response struct
 		var resp RandamuResponse
 		resp.Type = request.Type
+		resp.RequestId = intRequest.RequestID
 		resp.Response = randomInts
 
 		return json.Marshal(resp)
@@ -345,7 +284,6 @@ func (scraper *RandamuScraper) getRandomIntRange(requestData RandamuIntRangeRequ
 }
 
 func (scraper *RandamuScraper) getRandomInts(requestData RandamuIntRequest) ([]byte, error) {
-	log.Info("getRandomInts")
 
 	url := RANDAMU_API_BASE_URL + "random/int/" + strconv.Itoa(int(requestData.BitSize))
 	var body []byte

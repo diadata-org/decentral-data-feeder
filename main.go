@@ -31,11 +31,9 @@ var (
 
 func main() {
 
-	// wg := sync.WaitGroup{}
-
-	// Feeder mechanics
 	privateKeyHex := utils.Getenv("PRIVATE_KEY", "")
 	deployedContract := utils.Getenv("DEPLOYED_CONTRACT", "")
+
 	blockchainNode := utils.Getenv("BLOCKCHAIN_NODE", "")
 	backupNode := utils.Getenv("BACKUP_NODE", "")
 
