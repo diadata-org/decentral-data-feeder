@@ -62,8 +62,8 @@ func (scraper *CGScraper) getCGPrice(assetName, apiKey string) error {
 	}
 
 	defer response.Body.Close()
-	if 200 != response.StatusCode {
-		return fmt.Errorf("Error on coingecko API call with return code %d", response.StatusCode)
+	if response.StatusCode != 200 {
+		return fmt.Errorf("coingecko API call with return code %d", response.StatusCode)
 	}
 
 	contents, err := io.ReadAll(response.Body)

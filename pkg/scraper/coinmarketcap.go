@@ -2,7 +2,6 @@ package scraper
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -57,8 +56,8 @@ func (scraper *CMCScraper) getCmcPrices(assetNames, apiKey string) error {
 	}
 
 	defer response.Body.Close()
-	if 200 != response.StatusCode {
-		return errors.New(fmt.Sprintf("CMC API call with return code %d", response.StatusCode))
+	if response.StatusCode != 200 {
+		return fmt.Errorf("CMC API call with return code %d", response.StatusCode)
 	}
 
 	contents, err := io.ReadAll(response.Body)
