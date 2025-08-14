@@ -365,6 +365,11 @@ func getRwaQuoteFromDia(symbol string, assetType string) (tq TwelvedataQuote, er
 		return
 	}
 	err = json.Unmarshal(response, &tq)
+
+	// Notation in oracle should be USD/GBP instead of USD-GBP
+	if (assetType == string(Fiat) || assetType == string(Commodities)) && len(strings.Split(symbol, DIA_TICKER_SEPARATOR)) == 2 {
+		tq.Symbol = strings.Split(symbol, DIA_TICKER_SEPARATOR)[0] + TWELVEDATA_TICKER_SEPARATOR + strings.Split(symbol, DIA_TICKER_SEPARATOR)[1]
+	}
 	return
 
 }
