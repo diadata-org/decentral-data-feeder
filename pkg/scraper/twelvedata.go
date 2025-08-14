@@ -14,6 +14,12 @@ const (
 	TWELVEDATA                  = "TwelveData"
 	DIA_TICKER_SEPARATOR        = "-"
 	TWELVEDATA_TICKER_SEPARATOR = "/"
+
+	NyseOpen    dataType = "NyseOpen"
+	Equities    dataType = "Equities"
+	Fiat        dataType = "Fiat"
+	Commodities dataType = "Commodities"
+	ETF         dataType = "ETF"
 )
 
 var (
@@ -40,6 +46,8 @@ type twelvedataQuoteResponse struct {
 	MarketOpen bool   `json:"is_market_open"`
 }
 
+type dataType string
+
 type TwelvedataQuote struct {
 	Symbol      string    `json:"Ticker"`
 	Name        string    `json:"Name"`
@@ -47,7 +55,7 @@ type TwelvedataQuote struct {
 	Time        time.Time `json:"Timestamp"`
 	NYSEHoliday bool      `json:"Nyse_Holiday"`
 	NYSEOpen    bool      `json:"Nyse_Open"`
-	DataType    string
+	Type        dataType
 	Source      string
 }
 
@@ -124,8 +132,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		scraper.twelvedataStockMarketOpen = false
 	}
 
+	// Check if markets are open.
 	if !nyseHoliday && marketTime {
-		// Check if markets are open.
 		quote, err := scraper.getTwelveQuote("AAPL")
 		if err != nil {
 			log.Error("getTwelveQuote: ", err)
@@ -137,7 +145,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 	// Send information on nyse open or closed.
 	var quoteOpen TwelvedataQuote
-	quoteOpen.DataType = "NyseOpen"
+	quoteOpen.Type = NyseOpen
 	quoteOpen.NYSEHoliday = nyseHoliday
 	quoteOpen.NYSEOpen = marketTime
 	quoteOpen.Time = time.Now()
@@ -171,7 +179,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 				quote.Time = time.Now()
 			}
 			quote.Source = TWELVEDATA
-			quote.DataType = "Equities"
+			quote.Type = Equities
 
 			quoteBytes, err := json.Marshal(quote)
 			if err != nil {
@@ -199,9 +207,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			quote.Symbol = ticker
 			quote.Price = quotation.Rate
 			quote.Time = time.Unix(quotation.Timestamp, 0)
+		} else if err != nil {
+			continue
 		}
+
 		quote.Source = TWELVEDATA
-		quote.DataType = "Fiat"
+		quote.Type = Fiat
 
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
@@ -235,9 +246,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 				Time:   time.Unix(quotation.Timestamp, 0),
 				Name:   quotation.Name,
 			}
+		} else if err != nil {
+			continue
 		}
+
 		quote.Source = TWELVEDATA
-		quote.DataType = "Commodities"
+		quote.Type = Commodities
 
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
@@ -257,7 +271,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
 			quotation, err := scraper.getTwelveQuote(ticker)
 			if err != nil {
-				log.Error("getTwelveFXData: ", err)
+				log.Error("getTwelveETFData: ", err)
 			}
 
 			price, err := strconv.ParseFloat(quotation.Price, 64)
@@ -270,9 +284,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 				Price:  price,
 				Time:   time.Unix(quotation.Timestamp, 0),
 			}
+		} else if err != nil {
+			continue
 		}
+
 		quote.Source = TWELVEDATA
-		quote.DataType = "ETF"
+		quote.Type = ETF
 
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
@@ -324,6 +341,7 @@ func (scraper *TwelvedataScraper) getTwelveQuote(symbol string) (commodity twelv
 	if len(symbols) == 2 {
 		symbol = symbols[0] + TWELVEDATA_TICKER_SEPARATOR + symbols[1]
 	}
+
 	apiURL := twelvedataApiBaseString + "quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {
@@ -335,6 +353,11 @@ func (scraper *TwelvedataScraper) getTwelveQuote(symbol string) (commodity twelv
 }
 
 func getRwaQuoteFromDia(symbol string, assetType string) (tq TwelvedataQuote, err error) {
+
+	symbols := strings.Split(symbol, TWELVEDATA_TICKER_SEPARATOR)
+	if len(symbols) == 2 {
+		symbol = symbols[0] + DIA_TICKER_SEPARATOR + symbols[1]
+	}
 
 	url := diadataApiBaseString + "rwa/" + assetType + "/" + symbol
 	response, _, err := utils.GetRequest(url)

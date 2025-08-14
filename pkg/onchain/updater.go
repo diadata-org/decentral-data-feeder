@@ -56,7 +56,7 @@ func OracleUpdateExecutor(
 					continue
 				}
 
-				if twelvedataResponse.DataType == "NyseOpen" {
+				if twelvedataResponse.Type == scraper.NyseOpen {
 					// business time.
 					keys = append(keys, "NYSE_Open")
 					nyseOpen := int64(0)
@@ -74,7 +74,7 @@ func OracleUpdateExecutor(
 					values = append(values, nyseHoliday)
 				}
 
-				log.Info("got twelvedata data: ", twelvedataResponse)
+				log.Info("got rwa data: ", twelvedataResponse)
 				keys = append(keys, twelvedataResponse.Symbol)
 				values = append(values, int64(twelvedataResponse.Price*1e5))
 
