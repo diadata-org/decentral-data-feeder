@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 
@@ -110,6 +112,14 @@ func NewRandamuScraper() *RandamuScraper {
 	}
 
 	scraper.wsClientRequestorChain = wsClient
+
+	pingNodeInterval, err := strconv.ParseInt(utils.Getenv("PING_SERVER", "0"), 10, 64)
+	if err != nil {
+		log.Error("parse PING_SERVER: ", err)
+	}
+	if pingNodeInterval > 0 {
+		scraper.pingNode(pingNodeInterval)
+	}
 
 	go scraper.listen()
 
@@ -329,4 +339,18 @@ func (scraper *RandamuScraper) DataChannel() chan []byte {
 
 func (scraper *RandamuScraper) UpdateDoneChannel() chan bool {
 	return scraper.updateDoneChannel
+}
+
+func (scraper *RandamuScraper) pingNode(pingNodeInterval int64) {
+	ticker := time.NewTicker(time.Duration(pingNodeInterval) * time.Second)
+	go func() {
+		for range ticker.C {
+			blockNumber, err := scraper.wsClientRequestorChain.BlockNumber(context.Background())
+			if err != nil {
+				log.Error("pingNode: ", err)
+			} else {
+				log.Infof("ping server: %v -- blockNumber: %d", time.Now(), blockNumber)
+			}
+		}
+	}()
 }
