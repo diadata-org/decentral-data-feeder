@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 contract RandomRequestManager {
     event RequestReceived(uint256 indexed requestId, string seed, uint256 numOfValues);
+    event RequestFulfilled(uint256 indexed requestId, int256[] randomInts);
 
     // TO DO: Include type of request once we include all 3 randamu api endpoints.
     enum RequestType {
@@ -46,5 +47,6 @@ contract RandomRequestManager {
     ) external {
         // Implement your logic here. E.g.
         randomness[requestId] = randomInts;
+        emit RequestFulfilled(requestId, randomInts);
     }
 }
