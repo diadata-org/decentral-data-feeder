@@ -58,7 +58,7 @@ func OracleUpdateExecutor(
 
 				if twelvedataResponse.Type == scraper.NyseOpen {
 					// business time.
-					keys = append(keys, "NYSE_Open")
+					keys = append(keys, "US_Open")
 					nyseOpen := int64(0)
 					if twelvedataResponse.NYSEOpen {
 						nyseOpen = int64(1)
@@ -66,7 +66,7 @@ func OracleUpdateExecutor(
 					values = append(values, nyseOpen)
 
 					// holiday.
-					keys = append(keys, "NYSE_Holiday")
+					keys = append(keys, "US_Holiday")
 					nyseHoliday := int64(0)
 					if twelvedataResponse.NYSEHoliday {
 						nyseHoliday = int64(1)
