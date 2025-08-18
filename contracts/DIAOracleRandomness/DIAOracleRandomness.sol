@@ -1,4 +1,4 @@
-// compiled using solidity 0.8.30
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
 contract DIAOracleRandomness {
@@ -22,6 +22,7 @@ contract DIAOracleRandomness {
     struct IntArrayEntry {
         uint256 requestId;
         int256[] randomInts;
+        int64 round;
         string seed;
         string signature;
         bool exists;
@@ -113,6 +114,7 @@ contract DIAOracleRandomness {
         intArrayEntries[requestId] = IntArrayEntry({
             requestId: requestId,
             randomInts: randomInts,
+            round: round,
             seed: seed,
             signature: signature,
             exists: true
@@ -124,12 +126,13 @@ contract DIAOracleRandomness {
     function getIntArray(uint256 requestId_) external view returns (
         uint256 requestId,
         int256[] memory randomInts,
+        int64 round,
         string memory seed,
         string memory signature
     ) {
         require(intArrayEntries[requestId_].exists, "No IntArrayEntry for this round");
         IntArrayEntry storage entry = intArrayEntries[requestId_];
-        return (entry.requestId, entry.randomInts, entry.seed, entry.signature);
+        return (entry.requestId, entry.randomInts, entry.round, entry.seed, entry.signature);
     }
     
     function updateOracleUpdaterAddress(address newOracleUpdaterAddress) public {
