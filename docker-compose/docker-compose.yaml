@@ -1,7 +1,7 @@
 services:
   app:
     image: ${IMAGE_TAG}
-    # for latest image versions see IBM Container Registry
+    # for latest image versions see https://hub.docker.com/r/diadata/decentralized-data-feeder/tags
     env_file:
       - .env
     restart: always
