@@ -134,11 +134,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 	// Check if markets are open.
 	if !nyseHoliday && marketTime {
-		quote, err := scraper.getTwelveQuote("AAPL")
-		if err != nil {
-			log.Error("getTwelveQuote: ", err)
-		}
-		scraper.twelvedataStockMarketOpen = quote.MarketOpen
+		scraper.twelvedataStockMarketOpen = true
 	} else {
 		scraper.twelvedataStockMarketOpen = false
 	}
