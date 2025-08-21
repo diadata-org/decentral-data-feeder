@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/event"
 
 	requestor "github.com/diadata-org/decentral-data-feeder/contracts/RandomRequestManager"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
@@ -32,6 +33,8 @@ type RandamuScraper struct {
 	updateDoneChannel      chan bool
 	requestorContract      string
 	wsClientRequestorChain *ethclient.Client
+	requestSink            chan *requestor.RandomRequestManagerRequestReceived
+	sub                    event.Subscription
 }
 
 type RandamuMetadata struct {
@@ -106,12 +109,11 @@ func NewRandamuScraper() *RandamuScraper {
 	scraper.updateDoneChannel = make(chan bool)
 	scraper.requestorContract = utils.Getenv("REQUESTOR_CONTRACT", "")
 
-	wsClient, err := ethclient.Dial(utils.Getenv("WS_CLIENT_REQUESTOR_CHAIN", ""))
+	err := scraper.connect2WS()
 	if err != nil {
 		log.Fatal("get ws client for requestor chain: ", err)
 	}
-
-	scraper.wsClientRequestorChain = wsClient
+	scraper.requestSink = make(chan *requestor.RandomRequestManagerRequestReceived)
 
 	pingNodeInterval, err := strconv.ParseInt(utils.Getenv("PING_SERVER", "0"), 10, 64)
 	if err != nil {
@@ -130,22 +132,15 @@ func (scraper *RandamuScraper) listen() {
 
 	// Listen to request events from requestor.
 	log.Info("listen")
-	requestFilterer, err := requestor.NewRandomRequestManagerFilterer(common.HexToAddress(scraper.requestorContract), scraper.wsClientRequestorChain)
+	err := scraper.subscribe2Requests()
 	if err != nil {
-		log.Error("NewVRFRequestorFilterer: ", err)
-		return
-	}
-
-	requestSink := make(chan *requestor.RandomRequestManagerRequestReceived)
-	sub, err := requestFilterer.WatchRequestReceived(&bind.WatchOpts{}, requestSink, nil)
-	if err != nil {
-		log.Error("WatchRequestReceived: ", err)
+		log.Error("subscribe2Requests: ", err)
 	}
 
 	go func() {
 		for {
 			select {
-			case r, ok := <-requestSink:
+			case r, ok := <-scraper.requestSink:
 				if !ok {
 					log.Warn("Event channel closed")
 					return
@@ -157,13 +152,51 @@ func (scraper *RandamuScraper) listen() {
 				} else {
 					scraper.DataChannel() <- response
 				}
-			case err := <-sub.Err():
+			case err := <-scraper.sub.Err():
 				log.Error("Subscription error: ", err)
-				return
+				log.Info("resubscribe...")
+				err = scraper.connect2WS()
+				if err != nil {
+					log.Fatal("connect to websocket on requestor chain: ", err)
+				}
+				err = scraper.subscribe2Requests()
+				if err != nil {
+					log.Fatal("subscribe to requests: ", err)
+				}
+
 			}
 		}
 	}()
 
+}
+
+func (scraper *RandamuScraper) subscribe2Requests() error {
+	requestFilterer, err := requestor.NewRandomRequestManagerFilterer(common.HexToAddress(scraper.requestorContract), scraper.wsClientRequestorChain)
+	if err != nil {
+		log.Error("NewVRFRequestorFilterer: ", err)
+		return err
+	}
+
+	scraper.sub, err = requestFilterer.WatchRequestReceived(&bind.WatchOpts{}, scraper.requestSink, nil)
+	if err != nil {
+		log.Error("WatchRequestReceived: ", err)
+		return err
+	}
+	return nil
+}
+
+func (scraper *RandamuScraper) connect2WS() error {
+	// Close connection first in case already established.
+	if scraper.wsClientRequestorChain != nil {
+		scraper.wsClientRequestorChain.Close()
+		time.Sleep(2 * time.Second)
+	}
+	wsClient, err := ethclient.Dial(utils.Getenv("WS_CLIENT_REQUESTOR_CHAIN", ""))
+	if err != nil {
+		return err
+	}
+	scraper.wsClientRequestorChain = wsClient
+	return nil
 }
 
 func (scraper *RandamuScraper) processRequestEvent(requestEvent *requestor.RandomRequestManagerRequestReceived) ([]byte, error) {
