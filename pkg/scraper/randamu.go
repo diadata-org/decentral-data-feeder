@@ -35,6 +35,7 @@ type RandamuScraper struct {
 	wsClientRequestorChain *ethclient.Client
 	requestSink            chan *requestor.RandomRequestManagerRequestReceived
 	sub                    event.Subscription
+	reconnectWaitSeconds   int
 }
 
 type RandamuMetadata struct {
@@ -115,6 +116,11 @@ func NewRandamuScraper() *RandamuScraper {
 	}
 	scraper.requestSink = make(chan *requestor.RandomRequestManagerRequestReceived)
 
+	scraper.reconnectWaitSeconds, err = strconv.Atoi(utils.Getenv("WS_RECONNECT_WAIT_SECONDS", "20"))
+	if err != nil {
+		log.Error("reconnectWaitSeconds: ", err)
+	}
+
 	pingNodeInterval, err := strconv.ParseInt(utils.Getenv("PING_SERVER", "0"), 10, 64)
 	if err != nil {
 		log.Error("parse PING_SERVER: ", err)
@@ -154,6 +160,8 @@ func (scraper *RandamuScraper) listen() {
 				}
 			case err := <-scraper.sub.Err():
 				log.Error("Subscription error: ", err)
+				log.Infof("wait for %v seconds...", scraper.reconnectWaitSeconds)
+				time.Sleep(time.Duration(scraper.reconnectWaitSeconds) * time.Second)
 				log.Info("resubscribe...")
 				err = scraper.connect2WS()
 				if err != nil {
