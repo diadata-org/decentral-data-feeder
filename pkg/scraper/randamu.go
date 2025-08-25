@@ -160,9 +160,6 @@ func (scraper *RandamuScraper) listen() {
 				}
 			case err := <-scraper.sub.Err():
 				log.Error("Subscription error: ", err)
-				log.Infof("wait for %v seconds...", scraper.reconnectWaitSeconds)
-				time.Sleep(time.Duration(scraper.reconnectWaitSeconds) * time.Second)
-				log.Info("resubscribe...")
 				err = scraper.connect2WS()
 				if err != nil {
 					log.Fatal("connect to websocket on requestor chain: ", err)
@@ -197,8 +194,10 @@ func (scraper *RandamuScraper) connect2WS() error {
 	// Close connection first in case already established.
 	if scraper.wsClientRequestorChain != nil {
 		scraper.wsClientRequestorChain.Close()
-		time.Sleep(2 * time.Second)
+		log.Infof("wait for %v seconds...", scraper.reconnectWaitSeconds)
+		time.Sleep(time.Duration(scraper.reconnectWaitSeconds) * time.Second)
 	}
+	log.Info("reconnect...")
 	wsClient, err := ethclient.Dial(utils.Getenv("WS_CLIENT_REQUESTOR_CHAIN", ""))
 	if err != nil {
 		return err
