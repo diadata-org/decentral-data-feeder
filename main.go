@@ -10,15 +10,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	// Separator for entries in the environment variables, i.e. Binance:BTC-USDT,KuCoin:BTC-USDT.
-	ENV_SEPARATOR = ","
-	// Separator for a pair ticker's assets, i.e. BTC-USDT.
-	PAIR_TICKER_SEPARATOR = "-"
-	// Separator for a pair on a given exchange, i.e. Binance:BTC-USDT.
-	EXCHANGE_PAIR_SEPARATOR = ":"
-)
-
 var (
 	// Comma separated list of exchanges. Only used in case pairs are read from config files.
 	source = utils.Getenv("SOURCE", "Randamu")

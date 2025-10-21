@@ -1,0 +1,6 @@
+{
+            "Stocks": ["AAPL","MSFT","NVDA","AMZN","GOOG","META","TSLA","WMT","JPM","V"],
+            "FX": ["USD-EUR","USD-GBP","USD-CHF","USD-JPY"],
+            "Commodities": ["XAU-USD"],
+            "RWA": [""]
+}

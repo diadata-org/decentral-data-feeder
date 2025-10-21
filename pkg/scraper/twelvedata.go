@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diadata-org/decentral-data-feeder/pkg/models"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
 	calendar "github.com/scmhub/calendar"
 )
@@ -14,6 +15,8 @@ const (
 	TWELVEDATA                  = "TwelveData"
 	DIA_TICKER_SEPARATOR        = "-"
 	TWELVEDATA_TICKER_SEPARATOR = "/"
+	RWA_MARKET_SEPARATOR        = ","
+	CONFIG_PATH                 = "rwaConfig.json"
 
 	NyseOpen    dataType = "NyseOpen"
 	Equities    dataType = "Equities"
@@ -24,6 +27,7 @@ const (
 
 var (
 	twelvedataUpdateSeconds int64
+	configUpdateSeconds     int
 	twelvedataApiBaseString = "https://api.twelvedata.com/"
 	diadataApiBaseString    = "https://api.diadata.org/v1/"
 )
@@ -60,15 +64,15 @@ type TwelvedataQuote struct {
 }
 
 type TwelvedataScraper struct {
-	dataChannel               chan []byte
-	updateDoneChannel         chan bool
-	ticker                    *time.Ticker
-	twelvedataStockSymbols    []string
-	twelvedataStockMarketOpen bool
-	twelvedataFXTickers       []string
-	twelvedataCommodities     []string
-	twelvedataETFs            []string
-	apiKey                    string
+	dataChannel       chan []byte
+	updateDoneChannel chan bool
+	ticker            *time.Ticker
+	stockSymbols      []string
+	stockMarketOpen   bool
+	fXTickers         []string
+	commodities       []string
+	eTFs              []string
+	apiKey            string
 }
 
 func init() {
@@ -77,17 +81,23 @@ func init() {
 	if err != nil {
 		log.Error("Parse UPDATE_SECONDS: ", err)
 	}
+
+	configUpdateSeconds, err = strconv.Atoi(utils.Getenv("CONFIG_UPDATE_SECONDS", "86400"))
+	if err != nil {
+		log.Errorf("parse CONFIG_UPDATE_SECONDS: %v", err)
+		configUpdateSeconds = 86400
+	}
 }
 
 func NewTwelvedataScraper() *TwelvedataScraper {
 
 	s := &TwelvedataScraper{
-		ticker:                 time.NewTicker(time.Duration(twelvedataUpdateSeconds) * time.Second),
-		twelvedataStockSymbols: strings.Split(utils.Getenv("STOCK_SYMBOLS", "AAPL,MSFT,NVDA,AMZN,GOOG,META,TSLA,WMT,JPM,V"), ","),
-		twelvedataFXTickers:    strings.Split(utils.Getenv("FX_TICKERS", "USD-EUR,USD-GBP,USD-CHF,USD-JPY"), ","),
-		twelvedataCommodities:  strings.Split(utils.Getenv("COMMODITIES", "XAU-USD"), ","),
-		twelvedataETFs:         strings.Split(utils.Getenv("ETF", ""), ","),
-		apiKey:                 utils.Getenv("TWELVEDATA_API_KEY", ""),
+		ticker: time.NewTicker(time.Duration(twelvedataUpdateSeconds) * time.Second),
+		apiKey: utils.Getenv("TWELVEDATA_API_KEY", ""),
+	}
+	err := s.updateConfig(CONFIG_PATH)
+	if err != nil {
+		log.Fatal("Could not load configuration file: ", err)
 	}
 
 	s.dataChannel = make(chan []byte)
@@ -101,6 +111,14 @@ func NewTwelvedataScraper() *TwelvedataScraper {
 
 // mainLoop runs in a goroutine until channel s is closed.
 func (scraper *TwelvedataScraper) mainLoop() {
+
+	// Routine that periodically fetches the config.
+	go func() {
+		configTicker := time.NewTicker(time.Duration(time.Duration(configUpdateSeconds) * time.Second))
+		for range configTicker.C {
+			scraper.updateConfig(CONFIG_PATH)
+		}
+	}()
 
 	// Initial run.
 	err := scraper.UpdateQuotations()
@@ -129,14 +147,14 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		log.Error("isMarketOpen: ", err)
 	}
 	if nyseHoliday {
-		scraper.twelvedataStockMarketOpen = false
+		scraper.stockMarketOpen = false
 	}
 
 	// Check if markets are open.
 	if !nyseHoliday && marketTime {
-		scraper.twelvedataStockMarketOpen = true
+		scraper.stockMarketOpen = true
 	} else {
-		scraper.twelvedataStockMarketOpen = false
+		scraper.stockMarketOpen = false
 	}
 
 	// Send information on nyse open or closed.
@@ -151,9 +169,9 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 	}
 	scraper.dataChannel <- quoteBytes
 
-	if scraper.twelvedataStockMarketOpen {
-		log.Infof("Executing stock data update for %v symbols", getNumSymbols(scraper.twelvedataStockSymbols))
-		for _, symbol := range scraper.twelvedataStockSymbols {
+	if scraper.stockMarketOpen {
+		log.Infof("Executing stock data update for %v symbols", getNumSymbols(scraper.stockSymbols))
+		for _, symbol := range scraper.stockSymbols {
 			if symbol == "" {
 				continue
 			}
@@ -187,8 +205,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		log.Info("Stock market closed. No updates.")
 	}
 
-	log.Infof("Executing fx data update for %v symbols", getNumSymbols(scraper.twelvedataFXTickers))
-	for _, ticker := range scraper.twelvedataFXTickers {
+	log.Infof("Executing fx data update for %v symbols", getNumSymbols(scraper.fXTickers))
+	for _, ticker := range scraper.fXTickers {
 		if ticker == "" {
 			continue
 		}
@@ -218,8 +236,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		scraper.dataChannel <- quoteBytes
 	}
 
-	log.Infof("Executing commodities data update for %v symbols.", getNumSymbols(scraper.twelvedataCommodities))
-	for _, ticker := range scraper.twelvedataCommodities {
+	log.Infof("Executing commodities data update for %v symbols.", getNumSymbols(scraper.commodities))
+	for _, ticker := range scraper.commodities {
 		if ticker == "" {
 			continue
 		}
@@ -256,8 +274,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		scraper.dataChannel <- quoteBytes
 	}
 
-	log.Infof("Executing ETF data update for %v symbols", getNumSymbols(scraper.twelvedataETFs))
-	for _, ticker := range scraper.twelvedataETFs {
+	log.Infof("Executing ETF data update for %v symbols", getNumSymbols(scraper.eTFs))
+	for _, ticker := range scraper.eTFs {
 		if ticker == "" {
 			continue
 		}
@@ -368,6 +386,20 @@ func getRwaQuoteFromDia(symbol string, assetType string) (tq TwelvedataQuote, er
 	}
 	return
 
+}
+
+func (scraper *TwelvedataScraper) updateConfig(filePath string) error {
+	rwaConfig, err := models.GetRWAConfig(filePath)
+	if err != nil {
+		return err
+	}
+
+	scraper.stockSymbols = rwaConfig.Stocks
+	scraper.fXTickers = rwaConfig.FX
+	scraper.commodities = rwaConfig.Commodities
+	scraper.eTFs = rwaConfig.ETF
+
+	return nil
 }
 
 func (scraper *TwelvedataScraper) DataChannel() chan []byte {
