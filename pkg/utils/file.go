@@ -8,6 +8,10 @@ import (
 	"net/http"
 	"os"
 	"os/user"
+	"strconv"
+	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type GitHubContent struct {
@@ -42,21 +46,59 @@ func readFromRemote(filename string) (data []byte, err error) {
 
 	req, _ := http.NewRequest("GET", url, nil)
 
+	//Optional authentication
+	githubToken := Getenv("GITHUB_TOKEN", "")
+	if githubToken != "" {
+		log.Info("Set github token for API requests")
+		req.Header.Set("Authorization", "token "+githubToken)
+	}
+
+	time.Sleep(350 * time.Millisecond)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return
+		return nil, err
 	}
 	defer resp.Body.Close()
+
+	rateLimitRemaining, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining"))
+	if err != nil {
+		log.Error("rateLimitRemaining for github API calls: ", err)
+	}
+	log.Info("remaining github API calls: ", rateLimitRemaining)
+
+	//Only applies for anonymous calls or exhausted PAT limits
+	if rateLimitRemaining == 0 {
+		rateLimitReset, errParseInt := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64)
+		if errParseInt != nil {
+			log.Error("rateLimitReset for github API calls: ", errParseInt)
+		}
+
+		timeWait := rateLimitReset - time.Now().Unix()
+		if timeWait < 0 {
+			timeWait = 0
+		}
+
+		log.Warnf("Rate limit reached, waiting for refresh in %v", time.Duration(timeWait)*time.Second)
+		time.Sleep(time.Duration(timeWait+30) * time.Second)
+
+		resp.Body.Close()
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+	}
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		err = fmt.Errorf("GitHub API error: %s\n%s", resp.Status, string(body))
-		return
+		return nil, err
 	}
 
 	var gh GitHubContent
 	if err = json.NewDecoder(resp.Body).Decode(&gh); err != nil {
-		return
+		return nil, err
 	}
 	data, err = base64.StdEncoding.DecodeString(gh.Content)
 	return
