@@ -1,6 +1,6 @@
 {
-            "Stocks": ["MSFT","AAPL","NVDA","GOOG","AMZN","META","BRK.B","LLY","AVGO","JPM","TSLA","V","XOM","WMT","UNH","MA","PG","JNJ","COST","HD","MRK","ORCL","CVX","BAC","ABBV","KO","CRM","NFLX","PEP","AMD","TMO","WFC","ADBE","QCOM","CSCO","MCD","DIS","TMUS","DHR","ABT","INTU","CAT","GE","TXN","AXP","AMAT","VZ","AMGN","MS","PFE","CMCSA","PM","NEE","IBM","UNP","GS","NOW","COP","NKE","SCHW","RTX","UBER","MU","INTC","BLK","CME","PYPL","COIN","MSTR","HOOD","GME","XAU","FTP","VFS","T","PLTR","MARA","RIOT","CLSK"],
+            "Stocks": ["DXYZ","MSFT","AAPL","NVDA","GOOG","AMZN","META","BRK.B","LLY","AVGO","JPM","TSLA","V","XOM","WMT","UNH","MA","PG","JNJ","COST","HD","MRK","ORCL","CVX","BAC","ABBV","KO","CRM","NFLX","PEP","AMD","TMO","WFC","ADBE","QCOM","CSCO","MCD","DIS","TMUS","DHR","ABT","INTU","CAT","GE","TXN","AXP","AMAT","VZ","AMGN","MS","PFE","CMCSA","PM","NEE","IBM","UNP","GS","NOW","COP","NKE","SCHW","RTX","UBER","MU","INTC","BLK","CME","PYPL","COIN","MSTR","HOOD","GME","XAU","FTP","VFS","T","PLTR","MARA","RIOT","CLSK"],
             "FX": ["USD/NGN","USD/EUR","USD/BRL","USD/JPY","USD/CHF","USD/GBP","USD/CNY","USD/AUD","USD/CAD"],
-            "Commodities": ["XAU-USD","XAGG/USD","XBR/USD","WTI/USD","NG/USD"],
+            "Commodities": ["XAU/USD","XAG/USD","XAGG/USD","XBR/USD","WTI/USD","NG/USD"],
             "ETF": ["IVV","URTH","EEM","VOO","SPY","VTI","QQQ","IBIT","FBTC","ARKB","HODL","GBTC","BITO","ETHA","BETH","GOVT","VGSH","SHY","TLT"]
 }
