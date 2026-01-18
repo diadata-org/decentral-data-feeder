@@ -17,6 +17,8 @@ func NewDataScraper(source string) DataScraper {
 		return NewRandamuScraper()
 	case TWELVEDATA:
 		return NewTwelvedataScraper()
+	case PARTICULA:
+		return NewParticulaScraper()
 	default:
 		return nil
 	}

@@ -11,8 +11,7 @@ import (
 )
 
 var (
-	// Comma separated list of exchanges. Only used in case pairs are read from config files.
-	source = utils.Getenv("SOURCE", "Randamu")
+	source = utils.Getenv("SOURCE", "")
 )
 
 func main() {
@@ -47,6 +46,16 @@ func main() {
 
 	case scraper.TWELVEDATA:
 		DS = scraper.NewDataScraper(scraper.TWELVEDATA)
+
+		var contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService
+		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
+		if err != nil {
+			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
+		}
+		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+
+	case scraper.PARTICULA:
+		DS = scraper.NewDataScraper(scraper.PARTICULA)
 
 		var contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)

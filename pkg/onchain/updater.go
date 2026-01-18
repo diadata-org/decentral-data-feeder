@@ -78,6 +78,20 @@ func OracleUpdateExecutor(
 				keys = append(keys, twelvedataResponse.Symbol)
 				values = append(values, int64(twelvedataResponse.Price*1e5))
 
+			case scraper.PARTICULA:
+				tokenRating := make(map[string]int64)
+				err := json.Unmarshal(data, &tokenRating)
+				if err != nil {
+					log.Error("Unmarshal particula response: ", err)
+					continue
+				}
+
+				log.Info("got particula token rating data: ", tokenRating)
+				for key, value := range tokenRating {
+					keys = append(keys, key)
+					values = append(values, value)
+				}
+
 			case scraper.RANDAMU:
 
 				var randamuResponse scraper.RandamuResponse

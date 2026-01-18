@@ -2,11 +2,33 @@ package utils
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	log "github.com/sirupsen/logrus"
 )
+
+func GetRequestAuth(url string, accessToken string) (data []byte, statusCode int, err error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	statusCode = resp.StatusCode
+
+	if statusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		err = fmt.Errorf("Failed to get issuer tokens: %s %s", resp.Status, string(body))
+		return
+	}
+	data, err = io.ReadAll(resp.Body)
+	return
+}
 
 // GetRequest performs a get request on @url and returns the response body
 // as a slice of byte data.
@@ -33,7 +55,7 @@ func GetRequest(url string) ([]byte, int, error) {
 	}
 
 	// Read the response body
-	XMLdata, err := ioutil.ReadAll(response.Body)
+	XMLdata, err := io.ReadAll(response.Body)
 	if err != nil {
 		log.Error(err)
 		return []byte{}, response.StatusCode, err
