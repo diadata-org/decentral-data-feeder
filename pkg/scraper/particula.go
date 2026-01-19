@@ -17,10 +17,11 @@ import (
 
 // API Configuration
 const (
-	PARTICULA           = "Particula"
-	PARTICULA_BASE_URL  = "https://api.particula.io"
-	PARTICULA_AUTH_URL  = PARTICULA_BASE_URL + "/oauth/token"
-	PARTICULA_PRECISION = 1e8
+	PARTICULA                   = "Particula"
+	PARTICULA_BASE_URL          = "https://api.particula.io"
+	PARTICULA_AUTH_URL          = PARTICULA_BASE_URL + "/oauth/token"
+	PARTICULA_PRECISION         = 1e8
+	PARTICULA_API_ACCESS_BUFFER = 300
 )
 
 var (
@@ -29,6 +30,7 @@ var (
 
 type particulaAuthResponse struct {
 	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
 }
 
 type particulaIssuer struct {
@@ -55,13 +57,16 @@ type particulaTokenRatingResponse struct {
 }
 
 type ParticulaScraper struct {
-	dataChannel       chan []byte
-	updateDoneChannel chan bool
-	ticker            *time.Ticker
-	stockSymbols      []string
-	stockMarketOpen   bool
-	apiClientID       string
-	apiKey            string
+	dataChannel          chan []byte
+	updateDoneChannel    chan bool
+	ticker               *time.Ticker
+	stockSymbols         []string
+	stockMarketOpen      bool
+	apiClientID          string
+	apiKey               string
+	accessToken          string
+	accessTokenTimestamp time.Time
+	accessTokenValidity  time.Duration
 }
 
 func init() {
@@ -112,18 +117,24 @@ func (scraper *ParticulaScraper) mainLoop() {
 }
 
 func (scraper *ParticulaScraper) UpdateRatings() error {
+
 	log.Info("Authenticating...")
-
-	accessToken, err := getAccessToken(scraper.apiClientID, scraper.apiKey)
-	if err != nil || accessToken == "" {
-		fmt.Println("Failed to get access token:", err)
-		return err
+	if scraper.accessToken == "" || !scraper.accessTokenValid() {
+		if scraper.accessToken == "" {
+			log.Info("create initial access token")
+		} else if !scraper.accessTokenValid() {
+			log.Warn("access token out of date, create new one.")
+		}
+		err := scraper.getAccessToken(scraper.apiClientID, scraper.apiKey)
+		if err != nil || scraper.accessToken == "" {
+			log.Error("Failed to get access token:", err)
+			return err
+		}
 	}
-
 	log.Info("Authentication successful!")
 	log.Info("Fetching issuers...")
 
-	issuerResponse, err := listIssuers(accessToken)
+	issuerResponse, err := listIssuers(scraper.accessToken)
 	if err != nil || len(issuerResponse) == 0 {
 		log.Info("Failed to retrieve issuers or no issuers found:", err)
 		return err
@@ -142,7 +153,7 @@ func (scraper *ParticulaScraper) UpdateRatings() error {
 
 		log.Infof("Fetching tokens for issuer  with ID %s", issuer.ID)
 
-		tokens, err := getIssuerToken(issuer.ID, accessToken)
+		tokens, err := getIssuerToken(issuer.ID, scraper.accessToken)
 		if err != nil || len(tokens) == 0 {
 			return fmt.Errorf("Failed to retrieve issuer tokens or no tokens found: %v", err)
 		}
@@ -152,7 +163,7 @@ func (scraper *ParticulaScraper) UpdateRatings() error {
 		for i, token := range tokens {
 			log.Infof("token %d :: name -- symbol -- image -- id: %s -- %s -- %s -- %s", i, token.Name, token.Symbol, token.Image, token.ID)
 
-			rating, err := getTokenRatings(token.ID, accessToken)
+			rating, err := getTokenRatings(token.ID, scraper.accessToken)
 			if err != nil {
 				return err
 			}
@@ -187,7 +198,7 @@ func (scraper *ParticulaScraper) Close() error {
 	return nil
 }
 
-func getAccessToken(clientID, clientSecret string) (string, error) {
+func (scraper *ParticulaScraper) getAccessToken(clientID, clientSecret string) error {
 	data := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {clientID},
@@ -195,26 +206,31 @@ func getAccessToken(clientID, clientSecret string) (string, error) {
 	}
 	req, err := http.NewRequest("POST", PARTICULA_AUTH_URL, bytes.NewBufferString(data.Encode()))
 	if err != nil {
-		return "", err
+		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("authentication failed: %v", err)
+		return fmt.Errorf("authentication failed: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Auth failed: %s\n%s", resp.Status, string(body))
+		return fmt.Errorf("Auth failed: %s\n%s", resp.Status, string(body))
 	}
 
 	var authData particulaAuthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&authData); err != nil {
-		return "", err
+		return err
 	}
-	return authData.AccessToken, nil
+
+	scraper.accessTokenTimestamp = time.Now()
+	scraper.accessToken = authData.AccessToken
+	scraper.accessTokenValidity = time.Duration(authData.ExpiresIn) * time.Second
+	return nil
+
 }
 
 func listIssuers(accessToken string) (issuers particulaIssuersResponse, err error) {
@@ -274,6 +290,13 @@ func makeParticulaRatingMap(token particulaIssuer, tokenRating particulaTokenRat
 
 	return
 
+}
+
+func (scraper *ParticulaScraper) accessTokenValid() bool {
+	if time.Now().Before(scraper.accessTokenTimestamp.Add(scraper.accessTokenValidity - PARTICULA_API_ACCESS_BUFFER*time.Second)) {
+		return true
+	}
+	return false
 }
 
 // encodeRating encodes a rating given by a string to an integer.
