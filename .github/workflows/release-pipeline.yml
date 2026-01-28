@@ -1,0 +1,109 @@
+name: decentral-data-feeder-release-pipeline
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  push_images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Get release tag
+      - name: Get Release Tag
+        run: |
+          RELEASE_TAG=${GITHUB_REF#refs/tags/}
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+
+      # Install IBM Cloud CLI and Container Registry CLI
+      - name: Install IBM Cloud CLI
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud plugin install container-registry -f
+
+      # Log in to IBM Cloud
+      - name: Log in to IBM Cloud
+        env:
+          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+        run: |
+          ibmcloud login --apikey $IBM_CLOUD_API_KEY --no-region
+          ibmcloud target -r us-south
+          ibmcloud target -g Default
+
+      # Build and Tag Docker image for IBM Cloud Registry
+      - name: Build and Tag Docker image
+        run: |
+          docker build -f build/Dockerfile-luminaDataFeeder -t us.icr.io/dia-registry/oracles/decentral-data-feeder:${{ env.RELEASE_TAG }} .
+
+      # Push Docker image to IBM Cloud Registry
+      - name: Push Docker image to IBM Cloud Registry
+        run: |
+          ibmcloud cr login
+          docker push us.icr.io/dia-registry/oracles/decentral-data-feeder:${{ env.RELEASE_TAG }}
+
+      # Configure AWS credentials and push to ECR
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag and push image to AWS ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker tag us.icr.io/dia-registry/oracles/decentral-data-feeder:${{ env.RELEASE_TAG }} \
+            ${ECR_REGISTRY}/lumina/decentral-data-feeder:${{ env.RELEASE_TAG }}
+          docker push ${ECR_REGISTRY}/lumina/decentral-data-feeder:${{ env.RELEASE_TAG }}
+
+          echo "✅ Pushed image to AWS ECR:"
+          echo "  ${ECR_REGISTRY}/lumina/decentral-data-feeder:${{ env.RELEASE_TAG }}"
+
+      # Set up Docker Buildx for multi-arch builds
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      # Extract semantic version (remove 'v' prefix)
+      - name: Set SemVer tag
+        run: |
+          SEMVER_TAG=${RELEASE_TAG#v}
+          echo "SEMVER_TAG=$SEMVER_TAG" >> $GITHUB_ENV
+
+      # Build & push multi-arch image to Docker Hub
+      - name: Build & Push Multi-arch to Docker Hub
+        uses: docker/build-push-action@v4
+        timeout-minutes: 30
+        with:
+          context: .
+          file: build/Dockerfile-luminaDataFeeder
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            diadata/decentral-data-feeder:${{ env.SEMVER_TAG }}
+            ${{ !contains(env.SEMVER_TAG, '-') && 'diadata/decentral-data-feeder:latest' || '' }}
+          cache-from: type=registry,ref=diadata/decentral-data-feeder:buildcache
+          cache-to: type=registry,ref=diadata/decentral-data-feeder:buildcache,mode=max
+
+      # Logout and cleanup
+      - name: Logout and cleanup
+        run: |
+          docker logout
+          ibmcloud logout
