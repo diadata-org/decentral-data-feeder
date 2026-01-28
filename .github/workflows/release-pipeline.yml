@@ -97,10 +97,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            diadata/decentral-data-feeder:${{ env.SEMVER_TAG }}
-            ${{ !contains(env.SEMVER_TAG, '-') && 'diadata/decentral-data-feeder:latest' || '' }}
-          cache-from: type=registry,ref=diadata/decentral-data-feeder:buildcache
-          cache-to: type=registry,ref=diadata/decentral-data-feeder:buildcache,mode=max
+            diadata/decentralized-data-feeder:${{ env.SEMVER_TAG }}
+            ${{ !contains(env.SEMVER_TAG, '-') && 'diadata/decentralized-data-feeder:latest' || '' }}
+          cache-from: type=registry,ref=diadata/decentralized-data-feeder:buildcache
+          cache-to: type=registry,ref=diadata/decentralized-data-feeder:buildcache,mode=max
 
       # Logout and cleanup
       - name: Logout and cleanup
