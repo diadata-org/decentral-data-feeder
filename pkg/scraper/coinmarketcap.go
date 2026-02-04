@@ -44,7 +44,10 @@ func NewCMCScraper() *CMCScraper {
 func (scraper *CMCScraper) run() {
 	tick := time.NewTicker(time.Duration(120 * time.Second))
 	for range tick.C {
-		scraper.getCmcPrices(scraper.assetNames, scraper.apiKey)
+		err := scraper.getCmcPrices(scraper.assetNames, scraper.apiKey)
+		if err != nil {
+			log.Errorf("getCmcPrice for %s: %v", scraper.assetNames, err)
+		}
 	}
 }
 

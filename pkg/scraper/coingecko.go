@@ -46,7 +46,10 @@ func NewCGScraper() *CGScraper {
 func (scraper *CGScraper) run() {
 	tick := time.NewTicker(time.Duration(120 * time.Second))
 	for range tick.C {
-		scraper.getCGPrice(scraper.assetNames, scraper.apiKey)
+		err := scraper.getCGPrice(scraper.assetNames, scraper.apiKey)
+		if err != nil {
+			log.Errorf("getCGPrice for %s: %v", scraper.assetNames, err)
+		}
 	}
 }
 

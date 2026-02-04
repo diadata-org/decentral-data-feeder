@@ -116,7 +116,10 @@ func (scraper *TwelvedataScraper) mainLoop() {
 	go func() {
 		configTicker := time.NewTicker(time.Duration(time.Duration(configUpdateSeconds) * time.Second))
 		for range configTicker.C {
-			scraper.updateConfig(CONFIG_PATH)
+			err := scraper.updateConfig(CONFIG_PATH)
+			if err != nil {
+				log.Errorf("updateConfig %v", err)
+			}
 		}
 	}()
 

@@ -26,13 +26,13 @@ func main() {
 
 	var DS scraper.DataScraper
 	switch source {
-	case scraper.COINMARKETCAP:
-		DS = scraper.NewDataScraper(scraper.COINMARKETCAP)
-		// TO DO: add oracle updater
+	// case scraper.COINMARKETCAP:
+	// 	DS = scraper.NewDataScraper(scraper.COINMARKETCAP)
+	// 	// TO DO: add oracle updater
 
-	case scraper.COINGECKO:
-		DS = scraper.NewDataScraper(scraper.COINGECKO)
-		// TO DO: add oracle updater
+	// case scraper.COINGECKO:
+	// 	DS = scraper.NewDataScraper(scraper.COINGECKO)
+	// 	// TO DO: add oracle updater
 
 	case scraper.RANDAMU:
 		DS = scraper.NewDataScraper(scraper.RANDAMU)

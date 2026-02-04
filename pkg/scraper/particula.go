@@ -60,8 +60,6 @@ type ParticulaScraper struct {
 	dataChannel          chan []byte
 	updateDoneChannel    chan bool
 	ticker               *time.Ticker
-	stockSymbols         []string
-	stockMarketOpen      bool
 	apiClientID          string
 	apiKey               string
 	accessToken          string
