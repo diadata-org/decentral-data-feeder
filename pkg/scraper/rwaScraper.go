@@ -29,8 +29,8 @@ type RWAWSQuote struct {
 	Time          time.Time `json:"Time"`
 	Source        string    `json:"Source"`
 	Type          dataType  `json:"Type"`
-	HKHoliday     bool      `json:"HKHoliday"`
-	HKOpen        bool      `json:"HKOpen"`
+	MarketHoliday bool      `json:"MarketHoliday"`
+	MarketOpen    bool      `json:"MarketOpen"`
 	Exchange      string    `json:"Exchange,omitempty"`
 	MICCode       string    `json:"MICCode,omitempty"`
 	CurrencyBase  string    `json:"CurrencyBase,omitempty"`
@@ -96,10 +96,12 @@ type RWAWSScraper struct {
 	pendingQuotes map[string]RWAWSQuote
 
 	heartbeatTicker *time.Ticker
-	flushTicker     *time.Ticker
 	configTicker    *time.Ticker
 
-	publishInterval time.Duration
+	publishCooldown time.Duration
+	lastPublishTime time.Time
+	flushTimer      *time.Timer
+	flushTimerMu    sync.Mutex
 
 	hkLoc *time.Location
 	hkex  *calendar.Calendar
@@ -129,7 +131,7 @@ func NewRWAWSScraper() *RWAWSScraper {
 		wsURL:             utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
 		closed:            make(chan struct{}),
 		pendingQuotes:     make(map[string]RWAWSQuote),
-		publishInterval:   time.Duration(publishIntervalMs) * time.Millisecond,
+		publishCooldown:   time.Duration(publishIntervalMs) * time.Millisecond,
 		hkLoc:             hkLoc,
 		hkex:              calendar.XHKG(),
 	}
@@ -163,12 +165,16 @@ func (scraper *RWAWSScraper) Close() error {
 		if scraper.heartbeatTicker != nil {
 			scraper.heartbeatTicker.Stop()
 		}
-		if scraper.flushTicker != nil {
-			scraper.flushTicker.Stop()
-		}
 		if scraper.configTicker != nil {
 			scraper.configTicker.Stop()
 		}
+
+		scraper.flushTimerMu.Lock()
+		if scraper.flushTimer != nil {
+			scraper.flushTimer.Stop()
+			scraper.flushTimer = nil
+		}
+		scraper.flushTimerMu.Unlock()
 
 		scraper.connMu.Lock()
 		defer scraper.connMu.Unlock()
@@ -186,7 +192,6 @@ func (scraper *RWAWSScraper) mainLoop() {
 	}
 
 	scraper.heartbeatTicker = time.NewTicker(10 * time.Second)
-	scraper.flushTicker = time.NewTicker(scraper.publishInterval)
 	scraper.configTicker = time.NewTicker(time.Duration(configUpdateSeconds) * time.Second)
 
 	for {
@@ -200,9 +205,6 @@ func (scraper *RWAWSScraper) mainLoop() {
 			if err := scraper.sendHeartbeat(); err != nil {
 				log.Errorf("RWAWS sendHeartbeat: %v", err)
 			}
-
-		case <-scraper.flushTicker.C:
-			scraper.flushPending()
 
 		case <-scraper.configTicker.C:
 			if err := scraper.updateConfig(RAW_WS_CONFIG); err != nil {
@@ -354,18 +356,33 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 	switch {
 	case contains(scraper.stockSymbols, msg.Symbol):
 		quote.Type = Equities
-		quote.HKHoliday = scraper.isHKHoliday(time.Now())
-		quote.HKOpen = scraper.isHKMarketOpen(time.Now())
-		if !quote.HKOpen {
-			return nil
+
+		marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
+		if knownMarket {
+			quote.MarketHoliday = marketHoliday
+			quote.MarketOpen = marketOpen
+			if !marketOpen {
+				return nil
+			}
+		} else {
+			// Unknown market: do not block publishing in v1.
+			quote.MarketHoliday = false
+			quote.MarketOpen = true
 		}
 
 	case contains(scraper.etfs, msg.Symbol):
 		quote.Type = ETF
-		quote.HKHoliday = scraper.isHKHoliday(time.Now())
-		quote.HKOpen = scraper.isHKMarketOpen(time.Now())
-		if !quote.HKOpen {
-			return nil
+
+		marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
+		if knownMarket {
+			quote.MarketHoliday = marketHoliday
+			quote.MarketOpen = marketOpen
+			if !marketOpen {
+				return nil
+			}
+		} else {
+			quote.MarketHoliday = false
+			quote.MarketOpen = true
 		}
 
 	case contains(scraper.fxTickers, msg.Symbol):
@@ -383,10 +400,55 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 	scraper.pendingQuotes[quote.Symbol] = quote
 	scraper.pendingMu.Unlock()
 
+	scraper.maybePublishNowOrSchedule()
 	return nil
 }
 
-func (scraper *RWAWSScraper) flushPending() {
+// Publish immediately if cooldown already passed.
+// Otherwise ensure a one-shot timer exists to publish once cooldown ends.
+func (scraper *RWAWSScraper) maybePublishNowOrSchedule() {
+	now := time.Now()
+
+	scraper.pendingMu.Lock()
+	hasPending := len(scraper.pendingQuotes) > 0
+	lastPublish := scraper.lastPublishTime
+	scraper.pendingMu.Unlock()
+
+	if !hasPending {
+		return
+	}
+
+	if lastPublish.IsZero() || now.Sub(lastPublish) >= scraper.publishCooldown {
+		scraper.publishPendingBatch()
+		return
+	}
+
+	remaining := scraper.publishCooldown - now.Sub(lastPublish)
+	scraper.scheduleFlushAfter(remaining)
+}
+
+func (scraper *RWAWSScraper) scheduleFlushAfter(delay time.Duration) {
+	scraper.flushTimerMu.Lock()
+	defer scraper.flushTimerMu.Unlock()
+
+	if scraper.flushTimer != nil {
+		return
+	}
+
+	scraper.flushTimer = time.AfterFunc(delay, func() {
+		scraper.publishPendingBatch()
+
+		scraper.flushTimerMu.Lock()
+		scraper.flushTimer = nil
+		scraper.flushTimerMu.Unlock()
+
+		// In case more messages arrived while publishing and cooldown already passed
+		// by the time we finished, check again.
+		scraper.maybePublishNowOrSchedule()
+	})
+}
+
+func (scraper *RWAWSScraper) publishPendingBatch() {
 	scraper.pendingMu.Lock()
 	if len(scraper.pendingQuotes) == 0 {
 		scraper.pendingMu.Unlock()
@@ -398,7 +460,10 @@ func (scraper *RWAWSScraper) flushPending() {
 		toFlush = append(toFlush, q)
 	}
 	scraper.pendingQuotes = make(map[string]RWAWSQuote)
+	scraper.lastPublishTime = time.Now()
 	scraper.pendingMu.Unlock()
+
+	log.Infof("RWAWS - publishing batch of %d quotes", len(toFlush))
 
 	for _, quote := range toFlush {
 		quoteBytes, err := json.Marshal(quote)
@@ -457,6 +522,23 @@ func (scraper *RWAWSScraper) allSymbols() []string {
 	appendUnique(scraper.etfs)
 
 	return out
+}
+
+// Returns (holiday, open, knownMarket)
+func (scraper *RWAWSScraper) getStockMarketStatus(msg rwaWSMessage) (bool, bool, bool) {
+	mic := strings.ToUpper(strings.TrimSpace(msg.MICCode))
+	exchange := strings.ToUpper(strings.TrimSpace(msg.Exchange))
+	now := time.Now()
+
+	// HKEX / XHKG
+	if mic == "XHKG" || exchange == "HKEX" {
+		holiday := scraper.isHKHoliday(now)
+		open := scraper.isHKMarketOpen(now)
+		return holiday, open, true
+	}
+
+	// Unknown market in v1
+	return false, false, false
 }
 
 func (scraper *RWAWSScraper) isHKHoliday(now time.Time) bool {

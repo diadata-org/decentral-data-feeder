@@ -157,19 +157,19 @@ func OracleUpdateExecutor(
 				log.Info("got rwa ws data: ", rwaResponse)
 
 				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
-					keys = append(keys, "HK_Open")
-					hkOpen := int64(0)
-					if rwaResponse.HKOpen {
-						hkOpen = int64(1)
+					keys = append(keys, "Market_Open")
+					marketOpen := int64(0)
+					if rwaResponse.MarketOpen {
+						marketOpen = int64(1)
 					}
-					values = append(values, hkOpen)
+					values = append(values, marketOpen)
 
-					keys = append(keys, "HK_Holiday")
-					hkHoliday := int64(0)
-					if rwaResponse.HKHoliday {
-						hkHoliday = int64(1)
+					keys = append(keys, "Market_Holiday")
+					marketHoliday := int64(0)
+					if rwaResponse.MarketHoliday {
+						marketHoliday = int64(1)
 					}
-					values = append(values, hkHoliday)
+					values = append(values, marketHoliday)
 				}
 
 				keys = append(keys, rwaResponse.Symbol)
