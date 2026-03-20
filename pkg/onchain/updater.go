@@ -146,6 +146,34 @@ func OracleUpdateExecutor(
 
 				}
 
+			case scraper.RWAWS:
+				var rwaResponse scraper.RWAWSQuote
+				err := json.Unmarshal(data, &rwaResponse)
+				if err != nil {
+					log.Error("Unmarshal RWAWS response: ", err)
+					continue
+				}
+
+				log.Info("got rwa ws data: ", rwaResponse)
+
+				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
+					keys = append(keys, "HK_Open")
+					hkOpen := int64(0)
+					if rwaResponse.HKOpen {
+						hkOpen = int64(1)
+					}
+					values = append(values, hkOpen)
+
+					keys = append(keys, "HK_Holiday")
+					hkHoliday := int64(0)
+					if rwaResponse.HKHoliday {
+						hkHoliday = int64(1)
+					}
+					values = append(values, hkHoliday)
+				}
+
+				keys = append(keys, rwaResponse.Symbol)
+				values = append(values, int64(rwaResponse.Price*1e5))
 			}
 
 		case <-updateDoneChannel:
