@@ -27,6 +27,7 @@ type RWAWSQuote struct {
 	Name          string    `json:"Name"`
 	Price         float64   `json:"Price"`
 	Time          time.Time `json:"Time"`
+	ReceivedAt    time.Time `json:"ReceivedAt"`
 	Source        string    `json:"Source"`
 	Type          dataType  `json:"Type"`
 	MarketHoliday bool      `json:"MarketHoliday"`
@@ -345,6 +346,7 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 		Name:          chooseName(msg),
 		Price:         price,
 		Time:          parseTimestamp(msg.Timestamp),
+		ReceivedAt:    time.Now().UTC(),
 		Source:        RWAWS,
 		Exchange:      msg.Exchange,
 		MICCode:       msg.MICCode,
