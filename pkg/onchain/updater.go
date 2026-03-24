@@ -12,12 +12,8 @@ import (
 	diaOracleV2MultiupdateService "github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
-)
-
-var (
-	keys   []string
-	values []int64
 )
 
 func init() {
@@ -30,17 +26,17 @@ func init() {
 }
 
 func OracleUpdateExecutor(
-	// publishedPrices map[string]float64,
-	// newPrices map[string]float64,
-	// deviationPermille int,
+	conn *ethclient.Client,
 	auth *bind.TransactOpts,
+	nm *NonceManager,
 	contractAny any,
 	chainId int64,
-	// compatibilityMode bool,
 	source string,
 	dataChannel <-chan []byte,
 	updateDoneChannel <-chan bool,
 ) {
+	var keys []string
+	var values []int64
 
 	for {
 
@@ -182,7 +178,7 @@ func OracleUpdateExecutor(
 			log.Infof("collected %v responses. make oracle update...", len(values))
 			switch contract := contractAny.(type) {
 			case *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
-				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix())
+				err := updateOracleMultiValues(conn, nm, *contract, auth, keys, values, time.Now().Unix())
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
 					return
@@ -276,6 +272,8 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 }
 
 func updateOracleMultiValues(
+	conn *ethclient.Client,
+	nm *NonceManager,
 	contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
 	auth *bind.TransactOpts,
 	keys []string,
@@ -294,15 +292,14 @@ func updateOracleMultiValues(
 		cValues = append(cValues, cValue)
 	}
 
-	// Write values to smart contract
-	tx, err := contract.SetMultipleValues(&bind.TransactOpts{
-		From:     auth.From,
-		Signer:   auth.Signer,
-		GasPrice: gasPrice,
-	}, keys, cValues)
-	// check if tx is sendable then fgo backup
+	txOpts, err := nm.BuildTxOpts(conn, auth)
 	if err != nil {
-		// backup in here
+		return err
+	}
+	txOpts.GasPrice = gasPrice
+
+	tx, err := contract.SetMultipleValues(txOpts, keys, cValues)
+	if err != nil {
 		return err
 	}
 
