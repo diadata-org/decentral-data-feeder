@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	keys   []string
-	values []int64
+	keys              []string
+	values            []int64
+	symbolPositionMap map[string]int
 )
 
 func init() {
@@ -27,6 +28,7 @@ func init() {
 		log.Errorf("Parse log level: %v.", err)
 	}
 	log.SetLevel(loglevel)
+	symbolPositionMap = make(map[string]int)
 }
 
 func OracleUpdateExecutor(
@@ -146,6 +148,40 @@ func OracleUpdateExecutor(
 
 				}
 
+			case scraper.RWAWS:
+
+				// If map[symbol] does not exist, append to keys/values. Otherwise substitute at index of key.
+				var rwaResponse scraper.RWAWSQuote
+				err := json.Unmarshal(data, &rwaResponse)
+				if err != nil {
+					log.Error("Unmarshal RWAWS response: ", err)
+					continue
+				}
+
+				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
+					keys = append(keys, "Market_Open")
+					marketOpen := int64(0)
+					if rwaResponse.MarketOpen {
+						marketOpen = int64(1)
+					}
+					values = append(values, marketOpen)
+
+					keys = append(keys, "Market_Holiday")
+					marketHoliday := int64(0)
+					if rwaResponse.MarketHoliday {
+						marketHoliday = int64(1)
+					}
+					values = append(values, marketHoliday)
+				}
+
+				if _, ok := symbolPositionMap[rwaResponse.Symbol]; !ok {
+					keys = append(keys, rwaResponse.Symbol)
+					values = append(values, int64(rwaResponse.Price*1e5))
+					symbolPositionMap[rwaResponse.Symbol] = len(keys) - 1
+				} else {
+					values[symbolPositionMap[rwaResponse.Symbol]] = int64(rwaResponse.Price * 1e5)
+				}
+
 			}
 
 		case <-updateDoneChannel:
@@ -165,6 +201,7 @@ func OracleUpdateExecutor(
 			// reset keys and values for next update.
 			keys = []string{}
 			values = []int64{}
+			symbolPositionMap = make(map[string]int)
 		}
 
 	}
@@ -278,18 +315,14 @@ func updateOracleMultiValues(
 		return err
 	}
 
-	log.Infof("updater - Gas price: %d.", tx.GasPrice())
-	// log.Printf("Data: %x\n", tx.Data())
-	log.Infof("updater - Nonce: %d.", tx.Nonce())
-	log.Infof("updater - Tx To: %s.", tx.To().String())
-	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
+	logTx(tx)
 	return nil
 }
 
 func logTx(tx *types.Transaction) {
 	log.Infof("updater - Gas price: %d.", tx.GasPrice())
-	// log.Printf("Data: %x\n", tx.Data())
 	log.Infof("updater - Nonce: %d.", tx.Nonce())
 	log.Infof("updater - Tx To: %s.", tx.To().String())
 	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
+	// // log.Printf("Data: %x\n", tx.Data())
 }

@@ -1,0 +1,6 @@
+{
+    "Stocks": ["1211", "0700"],
+    "FX": ["EUR/USD", "GBP/USD", "JPY/USD","USD/NGN","USD/EUR","USD/BRL","USD/JPY","USD/CHF","USD/GBP","USD/CNY","USD/AUD","USD/CAD"],
+    "Commodities": ["C_1", "CL1"],
+    "ETF": ["DXYZ","IVV","URTH","EEM","VOO"]
+  }
