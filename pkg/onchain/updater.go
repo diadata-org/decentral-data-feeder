@@ -1,9 +1,12 @@
 package onchain
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"strconv"
+	"sync"
 	"time"
 
 	diaOracleRandomness "github.com/diadata-org/decentral-data-feeder/contracts/DIAOracleRandomness"
@@ -12,13 +15,11 @@ import (
 	diaOracleV2MultiupdateService "github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	keys   []string
-	values []int64
-)
+var txWriteMu sync.Mutex
 
 func init() {
 	log = logrus.New()
@@ -30,23 +31,22 @@ func init() {
 }
 
 func OracleUpdateExecutor(
-	// publishedPrices map[string]float64,
-	// newPrices map[string]float64,
-	// deviationPermille int,
+	conn *ethclient.Client,
 	auth *bind.TransactOpts,
 	contractAny any,
 	chainId int64,
-	// compatibilityMode bool,
 	source string,
 	dataChannel <-chan []byte,
 	updateDoneChannel <-chan bool,
 ) {
+	var keys []string
+	var values []int64
+
+	_ = chainId
 
 	for {
-
 		select {
 		case data := <-dataChannel:
-
 			switch source {
 			case scraper.TWELVEDATA:
 				var twelvedataResponse scraper.TwelvedataQuote
@@ -93,7 +93,6 @@ func OracleUpdateExecutor(
 				}
 
 			case scraper.RANDAMU:
-
 				var randamuResponse scraper.RandamuResponse
 				err := json.Unmarshal(data, &randamuResponse)
 				if err != nil {
@@ -107,10 +106,11 @@ func OracleUpdateExecutor(
 					err = json.Unmarshal(randamuResponse.Response, &randomBytes)
 					if err != nil {
 						log.Errorf("Unmarshal Randamu random bytes: %v.", err)
+						continue
 					}
 					randomBytes.RequestID = randamuResponse.RequestId
 
-					err = updateRandomnessOracle(*contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomBytes)
+					err = updateRandomnessOracle(conn, *contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomBytes)
 					if err != nil {
 						log.Errorf("updater - Failed to update Oracle: %v.", err)
 					}
@@ -120,10 +120,11 @@ func OracleUpdateExecutor(
 					err = json.Unmarshal(randamuResponse.Response, &randomIntRange)
 					if err != nil {
 						log.Errorf("Unmarshal Randamu random intRange: %v.", err)
+						continue
 					}
 					randomIntRange.RequestID = randamuResponse.RequestId
 
-					err = updateRandomnessOracle(*contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomIntRange)
+					err = updateRandomnessOracle(conn, *contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomIntRange)
 					if err != nil {
 						log.Errorf("updater - Failed to update Oracle: %v.", err)
 					}
@@ -133,47 +134,87 @@ func OracleUpdateExecutor(
 					err = json.Unmarshal(randamuResponse.Response, &randomInts)
 					if err != nil {
 						log.Errorf("Unmarshal Randamu random ints: %v.", err)
+						continue
 					}
 					randomInts.RequestID = randamuResponse.RequestId
 
 					log.Info("obtained random Ints: ", randomInts.Ints)
-					log.Infof("requestID -- round -- seed -- signature: %s -- %v -- %s -- %s", randomInts.RequestID.String(), randomInts.Metadata.Round, randomInts.Metadata.Seed, randomInts.Metadata.Signature)
+					log.Infof("requestID -- round -- seed -- signature: %s -- %v -- %s -- %s",
+						randomInts.RequestID.String(),
+						randomInts.Metadata.Round,
+						randomInts.Metadata.Seed,
+						randomInts.Metadata.Signature,
+					)
 
-					err = updateRandomnessOracle(*contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomInts)
+					err = updateRandomnessOracle(conn, *contractAny.(*diaOracleRandomness.DIAOracleRandomness), auth, randomInts)
 					if err != nil {
 						log.Errorf("updater - Failed to update Oracle: %v.", err)
 					}
-
 				}
 
+			case scraper.RWAWS:
+				var rwaResponse scraper.RWAWSQuote
+				err := json.Unmarshal(data, &rwaResponse)
+				if err != nil {
+					log.Error("Unmarshal RWAWS response: ", err)
+					continue
+				}
+
+				log.Info("got rwa ws data: ", rwaResponse)
+
+				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
+					keys = append(keys, "Market_Open")
+					marketOpen := int64(0)
+					if rwaResponse.MarketOpen {
+						marketOpen = int64(1)
+					}
+					values = append(values, marketOpen)
+
+					keys = append(keys, "Market_Holiday")
+					marketHoliday := int64(0)
+					if rwaResponse.MarketHoliday {
+						marketHoliday = int64(1)
+					}
+					values = append(values, marketHoliday)
+				}
+
+				keys = append(keys, rwaResponse.Symbol)
+				values = append(values, int64(rwaResponse.Price*1e5))
 			}
 
 		case <-updateDoneChannel:
-
 			// update oracle with collected keys and values.
 			log.Infof("collected %v responses. make oracle update...", len(values))
+
 			switch contract := contractAny.(type) {
 			case *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
-				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix())
+				err := updateOracleMultiValues(conn, *contract, auth, keys, values, time.Now().Unix())
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
 					return
 				}
-
 			}
 
 			// reset keys and values for next update.
 			keys = []string{}
 			values = []int64{}
 		}
-
 	}
 }
 
-func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, auth *bind.TransactOpts, data any) error {
+func updateRandomnessOracle(
+	conn *ethclient.Client,
+	contract diaOracleRandomness.DIAOracleRandomness,
+	auth *bind.TransactOpts,
+	data any,
+) error {
 	var gasPrice *big.Int
+
 	switch data := data.(type) {
 	case scraper.RandamuBytesResponse:
+		txWriteMu.Lock()
+		defer txWriteMu.Unlock()
+
 		tx, err := contract.SetBytes(&bind.TransactOpts{
 			From:     auth.From,
 			Signer:   auth.Signer,
@@ -190,6 +231,14 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 		}
 		logTx(tx)
 
+		receipt, err := bind.WaitMined(context.Background(), conn, tx)
+		if err != nil {
+			return err
+		}
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("randomness bytes tx failed: %s", tx.Hash().Hex())
+		}
+
 	case scraper.RandamuIntRangeResponse:
 		var bigInts []*big.Int
 		for _, i := range data.Ints {
@@ -199,6 +248,10 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 			}
 			bigInts = append(bigInts, big.NewInt(i64))
 		}
+
+		txWriteMu.Lock()
+		defer txWriteMu.Unlock()
+
 		tx, err := contract.SetIntRange(&bind.TransactOpts{
 			From:     auth.From,
 			Signer:   auth.Signer,
@@ -215,8 +268,17 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 		}
 		logTx(tx)
 
+		receipt, err := bind.WaitMined(context.Background(), conn, tx)
+		if err != nil {
+			return err
+		}
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("randomness int range tx failed: %s", tx.Hash().Hex())
+		}
+
 	case scraper.RandamuIntResponse:
 		log.Info("update oracle with IntResponse")
+
 		var bigInts []*big.Int
 		for _, i := range data.Ints {
 			i64, err := strconv.ParseInt(i, 10, 64)
@@ -225,6 +287,9 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 			}
 			bigInts = append(bigInts, big.NewInt(i64))
 		}
+
+		txWriteMu.Lock()
+		defer txWriteMu.Unlock()
 
 		tx, err := contract.SetIntArray(&bind.TransactOpts{
 			From:     auth.From,
@@ -242,21 +307,28 @@ func updateRandomnessOracle(contract diaOracleRandomness.DIAOracleRandomness, au
 		}
 		logTx(tx)
 
+		receipt, err := bind.WaitMined(context.Background(), conn, tx)
+		if err != nil {
+			return err
+		}
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("randomness int array tx failed: %s", tx.Hash().Hex())
+		}
 	}
 
 	return nil
 }
 
 func updateOracleMultiValues(
+	conn *ethclient.Client,
 	contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
 	auth *bind.TransactOpts,
 	keys []string,
 	values []int64,
-	timestamp int64) error {
-
+	timestamp int64,
+) error {
 	var cValues []*big.Int
 	var gasPrice *big.Int
-	var err error
 
 	for _, value := range values {
 		// Create compressed argument with values/timestamps
@@ -266,30 +338,42 @@ func updateOracleMultiValues(
 		cValues = append(cValues, cValue)
 	}
 
-	// Write values to smart contract
+	txWriteMu.Lock()
+	defer txWriteMu.Unlock()
+
 	tx, err := contract.SetMultipleValues(&bind.TransactOpts{
 		From:     auth.From,
 		Signer:   auth.Signer,
 		GasPrice: gasPrice,
 	}, keys, cValues)
-	// check if tx is sendable then fgo backup
 	if err != nil {
-		// backup in here
 		return err
 	}
 
 	log.Infof("updater - Gas price: %d.", tx.GasPrice())
-	// log.Printf("Data: %x\n", tx.Data())
 	log.Infof("updater - Nonce: %d.", tx.Nonce())
-	log.Infof("updater - Tx To: %s.", tx.To().String())
+	if tx.To() != nil {
+		log.Infof("updater - Tx To: %s.", tx.To().String())
+	}
 	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
+
+	receipt, err := bind.WaitMined(context.Background(), conn, tx)
+	if err != nil {
+		return err
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return fmt.Errorf("oracle update tx failed: %s", tx.Hash().Hex())
+	}
+
+	log.Infof("updater - Tx mined successfully: %s.", tx.Hash().Hex())
 	return nil
 }
 
 func logTx(tx *types.Transaction) {
 	log.Infof("updater - Gas price: %d.", tx.GasPrice())
-	// log.Printf("Data: %x\n", tx.Data())
 	log.Infof("updater - Nonce: %d.", tx.Nonce())
-	log.Infof("updater - Tx To: %s.", tx.To().String())
+	if tx.To() != nil {
+		log.Infof("updater - Tx To: %s.", tx.To().String())
+	}
 	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
 }
