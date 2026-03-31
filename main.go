@@ -27,12 +27,12 @@ func main() {
 	var DS scraper.DataScraper
 	switch source {
 	// case scraper.COINMARKETCAP:
-	// 	DS = scraper.NewDataScraper(scraper.COINMARKETCAP)
-	// 	// TO DO: add oracle updater
+	//  DS = scraper.NewDataScraper(scraper.COINMARKETCAP)
+	//  // TO DO: add oracle updater
 
 	// case scraper.COINGECKO:
-	// 	DS = scraper.NewDataScraper(scraper.COINGECKO)
-	// 	// TO DO: add oracle updater
+	//  DS = scraper.NewDataScraper(scraper.COINGECKO)
+	//  // TO DO: add oracle updater
 
 	case scraper.RANDAMU:
 		DS = scraper.NewDataScraper(scraper.RANDAMU)
@@ -42,7 +42,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutor(conn, auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
 
 	case scraper.TWELVEDATA:
 		DS = scraper.NewDataScraper(scraper.TWELVEDATA)
@@ -52,7 +52,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutor(conn, auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
 
 	case scraper.PARTICULA:
 		DS = scraper.NewDataScraper(scraper.PARTICULA)
@@ -62,7 +62,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutor(conn, auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
 
 	case scraper.RWAWS:
 		DS = scraper.NewDataScraper(scraper.RWAWS)
@@ -72,7 +72,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutor(conn, auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
 	}
 
 }
