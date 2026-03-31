@@ -1,8 +1,6 @@
 package onchain
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	diaOracleRandomness "github.com/diadata-org/decentral-data-feeder/contracts/DIAOracleRandomness"
@@ -82,15 +80,7 @@ func DeployOrBindContractOld(
 		}
 		log.Infof("Contract pending deploy: 0x%x.", addr)
 		log.Infof("Transaction waiting to be mined: 0x%x.", tx.Hash())
-		receipt, err := bind.WaitMined(context.Background(), conn, tx)
-		if err != nil {
-			return err
-		}
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("deploy transaction failed: tx=%s", tx.Hash().Hex())
-		}
-
-		log.Infof("Contract deployed successfully at %s in block %d.", addr.Hex(), receipt.BlockNumber.Uint64())
+		time.Sleep(180000 * time.Millisecond)
 	}
 	return nil
 }
