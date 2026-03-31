@@ -341,11 +341,17 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 		return err
 	}
 
+	quoteTime, validTs := parseTimestamp(msg.Timestamp)
+	if !validTs {
+		log.Warnf("RWAWS - dropping quote for %s: missing or invalid timestamp", msg.Symbol)
+		return nil
+	}
+
 	quote := RWAWSQuote{
 		Symbol:        msg.Symbol,
 		Name:          chooseName(msg),
 		Price:         price,
-		Time:          parseTimestamp(msg.Timestamp),
+		Time:          quoteTime,
 		ReceivedAt:    time.Now().UTC(),
 		Source:        RWAWS,
 		Exchange:      msg.Exchange,
@@ -577,11 +583,11 @@ func parseRawFloat(raw json.RawMessage) (float64, error) {
 	return strconv.ParseFloat(s, 64)
 }
 
-func parseTimestamp(ts int64) time.Time {
+func parseTimestamp(ts int64) (time.Time, bool) {
 	if ts <= 0 {
-		return time.Now().UTC()
+		return time.Time{}, false
 	}
-	return time.Unix(ts, 0).UTC()
+	return time.Unix(ts, 0).UTC(), true
 }
 
 func contains(values []string, target string) bool {
