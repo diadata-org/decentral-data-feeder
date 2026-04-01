@@ -72,7 +72,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutorForHighFrequencyScraper(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
 	}
 
 }
