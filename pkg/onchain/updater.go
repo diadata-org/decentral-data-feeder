@@ -100,35 +100,6 @@ func OracleUpdateExecutor(
 					keys = append(keys, key)
 					values = append(values, utils.ScaleInt(value, decimalsOracleValue))
 				}
-
-			case scraper.RWAWS:
-				var rwaResponse scraper.RWAWSQuote
-				err := json.Unmarshal(data, &rwaResponse)
-				if err != nil {
-					log.Error("Unmarshal RWAWS response: ", err)
-					continue
-				}
-
-				log.Info("got rwa ws data: ", rwaResponse)
-
-				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
-					keys = append(keys, "Market_Open")
-					marketOpen := big.NewInt(0)
-					if rwaResponse.MarketOpen {
-						marketOpen = utils.ScaleInt(1, decimalsOracleValue)
-					}
-					values = append(values, marketOpen)
-
-					keys = append(keys, "Market_Holiday")
-					marketHoliday := big.NewInt(0)
-					if rwaResponse.MarketHoliday {
-						marketHoliday = utils.ScaleInt(1, decimalsOracleValue)
-					}
-					values = append(values, marketHoliday)
-				}
-
-				keys = append(keys, rwaResponse.Symbol)
-				values = append(values, utils.ScaleFloat(rwaResponse.Price, decimalsOracleValue))
 			}
 
 		case <-updateDoneChannel:
@@ -146,77 +117,6 @@ func OracleUpdateExecutor(
 
 			default:
 				log.Errorf("DEBUG: Unknown contract type: %T", contractAny)
-			}
-
-			// reset keys and values for next update.
-			keys = []string{}
-			values = []*big.Int{}
-			isFirstRun = false // Mark first run as complete
-		}
-	}
-}
-
-func OracleUpdateExecutorForHighFrequencyScraper(
-	auth *bind.TransactOpts,
-	contractAny any,
-	chainId int64,
-	source string,
-	decimalsOracleValue int,
-	dataChannel <-chan []byte,
-	updateDoneChannel <-chan bool,
-) {
-
-	for {
-		select {
-		case data := <-dataChannel:
-
-			switch source {
-			case scraper.RWAWS:
-				var rwaResponse scraper.RWAWSQuote
-				err := json.Unmarshal(data, &rwaResponse)
-				if err != nil {
-					log.Error("Unmarshal RWAWS response: ", err)
-					continue
-				}
-
-				log.Info("got rwa ws data: ", rwaResponse)
-
-				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
-					keys = append(keys, "Market_Open")
-					marketOpen := big.NewInt(0)
-					if rwaResponse.MarketOpen {
-						marketOpen = utils.ScaleInt(1, decimalsOracleValue)
-					}
-					values = append(values, marketOpen)
-
-					keys = append(keys, "Market_Holiday")
-					marketHoliday := big.NewInt(0)
-					if rwaResponse.MarketHoliday {
-						marketHoliday = utils.ScaleInt(1, decimalsOracleValue)
-					}
-					values = append(values, marketHoliday)
-				} else {
-					keys = append(keys, rwaResponse.Symbol)
-					values = append(values, utils.ScaleFloat(rwaResponse.Price, decimalsOracleValue))
-				}
-			}
-		case <-updateDoneChannel:
-			log.Infof("OracleUpdateExecutorForHighFrequencyScraper collected %v responses. make oracle update...", len(values))
-
-			keysSnapshot := keys
-			valuesSnapshot := values
-			isFirstRunSnapshot := isFirstRun
-
-			switch contract := contractAny.(type) {
-			case diaoraclev3.DIAOracleV3:
-				go func() {
-					err := updateOracleMultiValues(contract, auth, keysSnapshot, valuesSnapshot, time.Now().Unix(), isFirstRunSnapshot)
-					if err != nil {
-						log.Warnf("updater - Failed to update Oracle: %v.", err)
-					}
-				}()
-			default:
-				log.Errorf("OracleUpdateExecutorForHighFrequencyScraper - Unknown contract type: %T", contractAny)
 			}
 
 			// reset keys and values for next update.

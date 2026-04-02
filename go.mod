@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.23.4
 
 require (
+	github.com/diadata-org/diadata v1.4.567
 	github.com/diadata-org/lumina-library v1.0.5-rc1
 	github.com/ethereum/go-ethereum v1.15.7
 	github.com/prometheus/client_golang v1.19.1
