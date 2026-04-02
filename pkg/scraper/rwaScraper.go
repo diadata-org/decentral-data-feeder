@@ -112,6 +112,8 @@ type RWAWSScraper struct {
 	contractAny any
 	chainId     int64
 	source      string
+
+	lastPublishedPrices map[string]int64
 }
 
 func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string) *RWAWSScraper {
@@ -130,19 +132,20 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 	}
 
 	s := &RWAWSScraper{
-		ctx:             ctx,
-		cancel:          cancel,
-		apiKey:          utils.Getenv("TWELVEDATA_API_KEY", ""),
-		wsURL:           utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
-		closed:          make(chan struct{}),
-		pendingQuotes:   make(map[string]RWAWSQuote),
-		publishCooldown: time.Duration(publishIntervalMs) * time.Millisecond,
-		hkLoc:           hkLoc,
-		hkex:            calendar.XHKG(),
-		auth:            auth,
-		contractAny:     contractAny,
-		chainId:         chainId,
-		source:          source,
+		ctx:                 ctx,
+		cancel:              cancel,
+		apiKey:              utils.Getenv("TWELVEDATA_API_KEY", ""),
+		wsURL:               utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
+		closed:              make(chan struct{}),
+		pendingQuotes:       make(map[string]RWAWSQuote),
+		publishCooldown:     time.Duration(publishIntervalMs) * time.Millisecond,
+		hkLoc:               hkLoc,
+		hkex:                calendar.XHKG(),
+		auth:                auth,
+		contractAny:         contractAny,
+		chainId:             chainId,
+		source:              source,
+		lastPublishedPrices: make(map[string]int64),
 	}
 
 	if s.apiKey == "" {
@@ -480,6 +483,22 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 		k, v := scraper.preparePublishData(quote)
 		keys = append(keys, k...)
 		values = append(values, v...)
+	}
+
+	filteredKeys := []string{}
+	filteredValues := []int64{}
+	for i, key := range keys {
+		last, exists := scraper.lastPublishedPrices[key]
+		if !exists || last != values[i] {
+			filteredKeys = append(filteredKeys, key)
+			filteredValues = append(filteredValues, values[i])
+			scraper.lastPublishedPrices[key] = values[i]
+		}
+	}
+
+	if len(filteredKeys) == 0 {
+		log.Infof("RWAWS - all prices unchanged, skipping oracle update")
+		return
 	}
 
 	scraper.publishData(keys, values)
