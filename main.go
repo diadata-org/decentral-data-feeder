@@ -1,6 +1,10 @@
 package main
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/diadata-org/decentral-data-feeder/pkg/metrics"
 	"github.com/diadata-org/decentral-data-feeder/pkg/onchain"
 	scraper "github.com/diadata-org/decentral-data-feeder/pkg/scraper"
@@ -54,14 +58,18 @@ func main() {
 		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
 
 	case scraper.RWAWS:
-		DS = scraper.NewDataScraper(scraper.RWAWS)
-
 		var contract diaoraclev3.DiaOracleV3MultiupdateService
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutorForHighFrequencyScraper(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+
+		s := scraper.NewRWAWSScraper(auth, c, chainId, source)
+		defer s.Close()
+
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		<-quit
 	}
 
 }
