@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/models"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
+	"github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ws "github.com/gorilla/websocket"
 	calendar "github.com/scmhub/calendar"
 )
@@ -75,9 +78,6 @@ type RWAWSScraper struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	dataChannel       chan []byte
-	updateDoneChannel chan bool
-
 	apiKey string
 	wsURL  string
 
@@ -106,9 +106,15 @@ type RWAWSScraper struct {
 
 	hkLoc *time.Location
 	hkex  *calendar.Calendar
+
+	// for oracle update
+	auth        *bind.TransactOpts
+	contractAny any
+	chainId     int64
+	source      string
 }
 
-func NewRWAWSScraper() *RWAWSScraper {
+func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string) *RWAWSScraper {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	publishIntervalMs, err := strconv.Atoi(utils.Getenv("RWA_WS_PUBLISH_INTERVAL_MS", "600"))
@@ -124,17 +130,19 @@ func NewRWAWSScraper() *RWAWSScraper {
 	}
 
 	s := &RWAWSScraper{
-		ctx:               ctx,
-		cancel:            cancel,
-		dataChannel:       make(chan []byte),
-		updateDoneChannel: make(chan bool),
-		apiKey:            utils.Getenv("TWELVEDATA_API_KEY", ""),
-		wsURL:             utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
-		closed:            make(chan struct{}),
-		pendingQuotes:     make(map[string]RWAWSQuote),
-		publishCooldown:   time.Duration(publishIntervalMs) * time.Millisecond,
-		hkLoc:             hkLoc,
-		hkex:              calendar.XHKG(),
+		ctx:             ctx,
+		cancel:          cancel,
+		apiKey:          utils.Getenv("TWELVEDATA_API_KEY", ""),
+		wsURL:           utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
+		closed:          make(chan struct{}),
+		pendingQuotes:   make(map[string]RWAWSQuote),
+		publishCooldown: time.Duration(publishIntervalMs) * time.Millisecond,
+		hkLoc:           hkLoc,
+		hkex:            calendar.XHKG(),
+		auth:            auth,
+		contractAny:     contractAny,
+		chainId:         chainId,
+		source:          source,
 	}
 
 	if s.apiKey == "" {
@@ -147,14 +155,6 @@ func NewRWAWSScraper() *RWAWSScraper {
 
 	go s.mainLoop()
 	return s
-}
-
-func (scraper *RWAWSScraper) DataChannel() chan []byte {
-	return scraper.dataChannel
-}
-
-func (scraper *RWAWSScraper) UpdateDoneChannel() chan bool {
-	return scraper.updateDoneChannel
 }
 
 func (scraper *RWAWSScraper) Close() error {
@@ -473,16 +473,58 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 
 	log.Infof("RWAWS - publishing batch of %d quotes", len(toFlush))
 
+	keys := []string{}
+	values := []int64{}
+
 	for _, quote := range toFlush {
-		quoteBytes, err := json.Marshal(quote)
-		if err != nil {
-			log.Error("marshal rwa ws quote: ", err)
-			continue
-		}
-		scraper.dataChannel <- quoteBytes
+		k, v := scraper.preparePublishData(quote)
+		keys = append(keys, k...)
+		values = append(values, v...)
 	}
 
-	scraper.updateDoneChannel <- true
+	scraper.publishData(keys, values)
+}
+
+func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []string, values []int64) {
+	log.Info("got rwa ws data: ", rwaResponse)
+
+	if rwaResponse.Type == Equities || rwaResponse.Type == ETF {
+		keys = append(keys, "Market_Open")
+		marketOpen := int64(0)
+		if rwaResponse.MarketOpen {
+			marketOpen = int64(1)
+		}
+		values = append(values, marketOpen)
+
+		keys = append(keys, "Market_Holiday")
+		marketHoliday := int64(0)
+		if rwaResponse.MarketHoliday {
+			marketHoliday = int64(1)
+		}
+		values = append(values, marketHoliday)
+	}
+
+	keys = append(keys, rwaResponse.Symbol)
+	values = append(values, int64(rwaResponse.Price*1e5))
+	return keys, values
+}
+
+func (scraper *RWAWSScraper) publishData(keys []string, values []int64) {
+	log.Infof("collected %v responses. make oracle update...", len(values))
+
+	switch contract := scraper.contractAny.(type) {
+	case *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
+		keysCopy := make([]string, len(keys))
+		copy(keysCopy, keys)
+		valuesCopy := make([]int64, len(values))
+		copy(valuesCopy, values)
+		go func() {
+			err := updateOracleMultiValuesForRWAWS(*contract, scraper.auth, keysCopy, valuesCopy, time.Now().Unix())
+			if err != nil {
+				log.Warnf("updater - Failed to update Oracle: %v.", err)
+			}
+		}()
+	}
 }
 
 func (scraper *RWAWSScraper) updateConfig(filename string) error {
@@ -608,4 +650,43 @@ func chooseName(msg rwaWSMessage) string {
 		return msg.Symbol
 	}
 	return "unknown"
+}
+
+func updateOracleMultiValuesForRWAWS(
+	contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
+	auth *bind.TransactOpts,
+	keys []string,
+	values []int64,
+	timestamp int64) error {
+
+	var cValues []*big.Int
+	var gasPrice *big.Int
+	var err error
+
+	for _, value := range values {
+		// Create compressed argument with values/timestamps
+		cValue := big.NewInt(value)
+		cValue = cValue.Lsh(cValue, 128)
+		cValue = cValue.Add(cValue, big.NewInt(timestamp))
+		cValues = append(cValues, cValue)
+	}
+
+	// Write values to smart contract
+	tx, err := contract.SetMultipleValues(&bind.TransactOpts{
+		From:     auth.From,
+		Signer:   auth.Signer,
+		GasPrice: gasPrice,
+	}, keys, cValues)
+	// check if tx is sendable then fgo backup
+	if err != nil {
+		// backup in here
+		return err
+	}
+
+	log.Infof("updater - Gas price: %d.", tx.GasPrice())
+	// log.Printf("Data: %x\n", tx.Data())
+	log.Infof("updater - Nonce: %d.", tx.Nonce())
+	log.Infof("updater - Tx To: %s.", tx.To().String())
+	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
+	return nil
 }
