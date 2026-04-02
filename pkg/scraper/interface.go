@@ -19,8 +19,6 @@ func NewDataScraper(source string) DataScraper {
 		return NewTwelvedataScraper()
 	case PARTICULA:
 		return NewParticulaScraper()
-	case RWAWS:
-		return NewRWAWSScraper()
 	default:
 		return nil
 	}

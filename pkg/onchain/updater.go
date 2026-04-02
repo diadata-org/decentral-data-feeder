@@ -145,35 +145,6 @@ func OracleUpdateExecutor(
 					}
 
 				}
-
-			case scraper.RWAWS:
-				var rwaResponse scraper.RWAWSQuote
-				err := json.Unmarshal(data, &rwaResponse)
-				if err != nil {
-					log.Error("Unmarshal RWAWS response: ", err)
-					continue
-				}
-
-				log.Info("got rwa ws data: ", rwaResponse)
-
-				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
-					keys = append(keys, "Market_Open")
-					marketOpen := int64(0)
-					if rwaResponse.MarketOpen {
-						marketOpen = int64(1)
-					}
-					values = append(values, marketOpen)
-
-					keys = append(keys, "Market_Holiday")
-					marketHoliday := int64(0)
-					if rwaResponse.MarketHoliday {
-						marketHoliday = int64(1)
-					}
-					values = append(values, marketHoliday)
-				}
-
-				keys = append(keys, rwaResponse.Symbol)
-				values = append(values, int64(rwaResponse.Price*1e5))
 			}
 
 		case <-updateDoneChannel:
@@ -188,72 +159,6 @@ func OracleUpdateExecutor(
 					return
 				}
 
-			}
-
-			// reset keys and values for next update.
-			keys = []string{}
-			values = []int64{}
-		}
-	}
-}
-
-func OracleUpdateExecutorForHighFrequencyScraper(
-	auth *bind.TransactOpts,
-	contractAny any,
-	chainId int64,
-	source string,
-	dataChannel <-chan []byte,
-	updateDoneChannel <-chan bool,
-) {
-
-	for {
-		select {
-		case data := <-dataChannel:
-
-			switch source {
-			case scraper.RWAWS:
-				var rwaResponse scraper.RWAWSQuote
-				err := json.Unmarshal(data, &rwaResponse)
-				if err != nil {
-					log.Error("Unmarshal RWAWS response: ", err)
-					continue
-				}
-
-				log.Info("got rwa ws data: ", rwaResponse)
-
-				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
-					keys = append(keys, "Market_Open")
-					marketOpen := int64(0)
-					if rwaResponse.MarketOpen {
-						marketOpen = int64(1)
-					}
-					values = append(values, marketOpen)
-
-					keys = append(keys, "Market_Holiday")
-					marketHoliday := int64(0)
-					if rwaResponse.MarketHoliday {
-						marketHoliday = int64(1)
-					}
-					values = append(values, marketHoliday)
-				}
-
-				keys = append(keys, rwaResponse.Symbol)
-				values = append(values, int64(rwaResponse.Price*1e5))
-			}
-		case <-updateDoneChannel:
-			log.Infof("collected %v responses. make oracle update...", len(values))
-
-			keysSnapshot := keys
-			valuesSnapshot := values
-
-			switch contract := contractAny.(type) {
-			case *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
-				go func() {
-					err := updateOracleMultiValues(*contract, auth, keysSnapshot, valuesSnapshot, time.Now().Unix())
-					if err != nil {
-						log.Warnf("updater - Failed to update Oracle: %v.", err)
-					}
-				}()
 			}
 
 			// reset keys and values for next update.
