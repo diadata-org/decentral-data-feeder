@@ -2,8 +2,11 @@ package main
 
 import (
 	"crypto/ecdsa"
+	"os"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/metrics"
 	"github.com/diadata-org/decentral-data-feeder/pkg/onchain"
@@ -29,8 +32,6 @@ func main() {
 		decimalsOracleValue = 18
 	}
 	log.Infof("Using DECIMALS_ORACLE_VALUE: %d", decimalsOracleValue)
-
-	// ----------------------------------- Metrics -----------------------------------
 
 	sources, err := scraper.GetSourcesFromEnv("SOURCES")
 	if err != nil {
@@ -91,11 +92,16 @@ func handleParticula(deployedContract string, conn *ethclient.Client, auth *bind
 }
 
 func handleRWAWS(deployedContract string, conn *ethclient.Client, auth *bind.TransactOpts, chainId int64, source string, decimalsOracleValue int) {
-	DS := scraper.NewDataScraper(scraper.RWAWS)
 	var contract diaoraclev3.DIAOracleV3
 	c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 	if err != nil {
 		log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 	}
-	onchain.OracleUpdateExecutorForHighFrequencyScraper(auth, c, chainId, source, decimalsOracleValue, DS.DataChannel(), DS.UpdateDoneChannel())
+
+	s := scraper.NewRWAWSScraper(auth, c, chainId, source, int64(decimalsOracleValue))
+	defer s.Close()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 }
