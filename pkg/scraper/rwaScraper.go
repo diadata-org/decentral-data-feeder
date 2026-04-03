@@ -107,7 +107,7 @@ type RWAWSScraper struct {
 	hkLoc *time.Location
 	hkex  *calendar.Calendar
 
-	lastPublishedPrices map[string]int64
+	lastPublishedPrices map[string]float64
 	lastPublishedTimes  map[string]time.Time
 	forcePublishAfter   time.Duration
 }
@@ -127,10 +127,10 @@ func NewRWAWSScraper() *RWAWSScraper {
 		hkLoc = time.FixedZone("HKT", 8*3600)
 	}
 
-	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "180"))
+	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "30"))
 	if err != nil {
 		log.Errorf("parse RWA_WS_FORCE_PUBLISH_AFTER_SECONDS: %v", err)
-		forcePublishAfterSec = 180
+		forcePublishAfterSec = 30
 	}
 
 	s := &RWAWSScraper{
@@ -145,7 +145,7 @@ func NewRWAWSScraper() *RWAWSScraper {
 		publishCooldown:     time.Duration(publishIntervalMs) * time.Millisecond,
 		hkLoc:               hkLoc,
 		hkex:                calendar.XHKG(),
-		lastPublishedPrices: make(map[string]int64),
+		lastPublishedPrices: make(map[string]float64),
 		lastPublishedTimes:  make(map[string]time.Time),
 		forcePublishAfter:   time.Duration(forcePublishAfterSec) * time.Second,
 	}
@@ -490,7 +490,7 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 	filtered := []RWAWSQuote{}
 
 	for _, quote := range toFlush {
-		priceVal := int64(quote.Price * 1e5)
+		priceVal := quote.Price
 		last, exists := scraper.lastPublishedPrices[quote.Symbol]
 		lastTime := scraper.lastPublishedTimes[quote.Symbol]
 
