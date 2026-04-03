@@ -114,6 +114,8 @@ type RWAWSScraper struct {
 	source      string
 
 	lastPublishedPrices map[string]int64
+	lastPublishedTimes  map[string]time.Time
+	forcePublishAfter   time.Duration
 }
 
 func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string) *RWAWSScraper {
@@ -131,6 +133,11 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		hkLoc = time.FixedZone("HKT", 8*3600)
 	}
 
+	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "180"))
+	if err != nil {
+		forcePublishAfterSec = 180
+	}
+
 	s := &RWAWSScraper{
 		ctx:                 ctx,
 		cancel:              cancel,
@@ -146,6 +153,8 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		chainId:             chainId,
 		source:              source,
 		lastPublishedPrices: make(map[string]int64),
+		lastPublishedTimes:  make(map[string]time.Time),
+		forcePublishAfter:   time.Duration(forcePublishAfterSec) * time.Second,
 	}
 
 	if s.apiKey == "" {
@@ -487,12 +496,20 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 
 	filteredKeys := []string{}
 	filteredValues := []int64{}
+	now := time.Now()
+
 	for i, key := range keys {
 		last, exists := scraper.lastPublishedPrices[key]
-		if !exists || last != values[i] {
+		lastTime := scraper.lastPublishedTimes[key]
+
+		priceChanged := !exists || last != values[i]
+		timedOut := exists && now.Sub(lastTime) >= scraper.forcePublishAfter
+
+		if priceChanged || timedOut {
 			filteredKeys = append(filteredKeys, key)
 			filteredValues = append(filteredValues, values[i])
 			scraper.lastPublishedPrices[key] = values[i]
+			scraper.lastPublishedTimes[key] = now
 		}
 	}
 
@@ -501,7 +518,7 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 		return
 	}
 
-	scraper.publishData(keys, values)
+	scraper.publishData(filteredKeys, filteredValues)
 }
 
 func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []string, values []int64) {
@@ -680,7 +697,6 @@ func updateOracleMultiValuesForRWAWS(
 
 	var cValues []*big.Int
 	var gasPrice *big.Int
-	var err error
 
 	for _, value := range values {
 		// Create compressed argument with values/timestamps
