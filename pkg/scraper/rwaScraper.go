@@ -113,7 +113,7 @@ type RWAWSScraper struct {
 	chainId     int64
 	source      string
 
-	lastPublishedPrices map[string]int64
+	lastPublishedPrices map[string]float64
 	lastPublishedTimes  map[string]time.Time
 	forcePublishAfter   time.Duration
 }
@@ -133,9 +133,9 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		hkLoc = time.FixedZone("HKT", 8*3600)
 	}
 
-	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "180"))
+	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "30"))
 	if err != nil {
-		forcePublishAfterSec = 180
+		forcePublishAfterSec = 30
 	}
 
 	s := &RWAWSScraper{
@@ -152,7 +152,7 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		contractAny:         contractAny,
 		chainId:             chainId,
 		source:              source,
-		lastPublishedPrices: make(map[string]int64),
+		lastPublishedPrices: make(map[string]float64),
 		lastPublishedTimes:  make(map[string]time.Time),
 		forcePublishAfter:   time.Duration(forcePublishAfterSec) * time.Second,
 	}
@@ -485,40 +485,38 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 
 	log.Infof("RWAWS - publishing batch of %d quotes", len(toFlush))
 
+	now := time.Now()
+	filtered := []RWAWSQuote{}
+
+	for _, quote := range toFlush {
+		last, exists := scraper.lastPublishedPrices[quote.Symbol]
+		lastTime := scraper.lastPublishedTimes[quote.Symbol]
+
+		priceChanged := !exists || last != quote.Price
+		timedOut := exists && now.Sub(lastTime) >= scraper.forcePublishAfter
+
+		if priceChanged || timedOut {
+			filtered = append(filtered, quote)
+			scraper.lastPublishedPrices[quote.Symbol] = quote.Price
+			scraper.lastPublishedTimes[quote.Symbol] = now
+		}
+	}
+
+	if len(filtered) == 0 {
+		log.Infof("RWAWS - all prices unchanged, skipping oracle update")
+		return
+	}
+
 	keys := []string{}
 	values := []int64{}
 
-	for _, quote := range toFlush {
+	for _, quote := range filtered {
 		k, v := scraper.preparePublishData(quote)
 		keys = append(keys, k...)
 		values = append(values, v...)
 	}
 
-	filteredKeys := []string{}
-	filteredValues := []int64{}
-	now := time.Now()
-
-	for i, key := range keys {
-		last, exists := scraper.lastPublishedPrices[key]
-		lastTime := scraper.lastPublishedTimes[key]
-
-		priceChanged := !exists || last != values[i]
-		timedOut := exists && now.Sub(lastTime) >= scraper.forcePublishAfter
-
-		if priceChanged || timedOut {
-			filteredKeys = append(filteredKeys, key)
-			filteredValues = append(filteredValues, values[i])
-			scraper.lastPublishedPrices[key] = values[i]
-			scraper.lastPublishedTimes[key] = now
-		}
-	}
-
-	if len(filteredKeys) == 0 {
-		log.Infof("RWAWS - all prices unchanged, skipping oracle update")
-		return
-	}
-
-	scraper.publishData(filteredKeys, filteredValues)
+	scraper.publishData(keys, values)
 }
 
 func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []string, values []int64) {
