@@ -106,6 +106,10 @@ type RWAWSScraper struct {
 
 	hkLoc *time.Location
 	hkex  *calendar.Calendar
+
+	lastPublishedPrices map[string]int64
+	lastPublishedTimes  map[string]time.Time
+	forcePublishAfter   time.Duration
 }
 
 func NewRWAWSScraper() *RWAWSScraper {
@@ -123,18 +127,27 @@ func NewRWAWSScraper() *RWAWSScraper {
 		hkLoc = time.FixedZone("HKT", 8*3600)
 	}
 
+	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "180"))
+	if err != nil {
+		log.Errorf("parse RWA_WS_FORCE_PUBLISH_AFTER_SECONDS: %v", err)
+		forcePublishAfterSec = 180
+	}
+
 	s := &RWAWSScraper{
-		ctx:               ctx,
-		cancel:            cancel,
-		dataChannel:       make(chan []byte),
-		updateDoneChannel: make(chan bool),
-		apiKey:            utils.Getenv("TWELVEDATA_API_KEY", ""),
-		wsURL:             utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
-		closed:            make(chan struct{}),
-		pendingQuotes:     make(map[string]RWAWSQuote),
-		publishCooldown:   time.Duration(publishIntervalMs) * time.Millisecond,
-		hkLoc:             hkLoc,
-		hkex:              calendar.XHKG(),
+		ctx:                 ctx,
+		cancel:              cancel,
+		dataChannel:         make(chan []byte),
+		updateDoneChannel:   make(chan bool),
+		apiKey:              utils.Getenv("TWELVEDATA_API_KEY", ""),
+		wsURL:               utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
+		closed:              make(chan struct{}),
+		pendingQuotes:       make(map[string]RWAWSQuote),
+		publishCooldown:     time.Duration(publishIntervalMs) * time.Millisecond,
+		hkLoc:               hkLoc,
+		hkex:                calendar.XHKG(),
+		lastPublishedPrices: make(map[string]int64),
+		lastPublishedTimes:  make(map[string]time.Time),
+		forcePublishAfter:   time.Duration(forcePublishAfterSec) * time.Second,
 	}
 
 	if s.apiKey == "" {
@@ -473,7 +486,30 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 
 	log.Infof("RWAWS - publishing batch of %d quotes", len(toFlush))
 
+	now := time.Now()
+	filtered := []RWAWSQuote{}
+
 	for _, quote := range toFlush {
+		priceVal := int64(quote.Price * 1e5)
+		last, exists := scraper.lastPublishedPrices[quote.Symbol]
+		lastTime := scraper.lastPublishedTimes[quote.Symbol]
+
+		priceChanged := !exists || last != priceVal
+		timedOut := exists && now.Sub(lastTime) >= scraper.forcePublishAfter
+
+		if priceChanged || timedOut {
+			filtered = append(filtered, quote)
+			scraper.lastPublishedPrices[quote.Symbol] = priceVal
+			scraper.lastPublishedTimes[quote.Symbol] = now
+		}
+	}
+
+	if len(filtered) == 0 {
+		log.Infof("RWAWS - all prices unchanged, skipping oracle update")
+		return
+	}
+
+	for _, quote := range filtered {
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
 			log.Error("marshal rwa ws quote: ", err)
