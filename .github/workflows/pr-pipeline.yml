@@ -4,136 +4,166 @@ on:
   pull_request:
     branches:
       - master
-  workflow_dispatch:  # This allows manual triggering
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+  workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
 
 env:
-  ACTIONS_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG }}  # Set debug mode globally
+  ACTIONS_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG }}
 
 jobs:
-  lint_build_and_push:
+  push_image_and_deploy:
     runs-on: ubuntu-latest
     environment:
       name: dia-testspace
     steps:
-      # Checkout decentral-data-feeder repo
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # Set up Go
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
 
-      # Get Short Commit Hash of the Merge Commit
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
       - name: Get Short Commit Hash
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
           echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
 
-      # Go module download and verify
-      - name: Download Go modules
+      - name: Detect changed sources
         run: |
-          go mod download
-          go mod verify
+          # Get changed files comparing to base branch
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
 
-      # Run Go linting and formatting
-      - name: Run Go linting
-        run: |
-          go fmt ./...
-          go vet ./...
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
 
-      # Run Go build to ensure compilation works
-      - name: Build Go application
-        run: |
-          go build -v ./...
+          DEPLOY_TWELVEDATA=false
+          DEPLOY_PARTICULA=false
+          DEPLOY_ALL=false
 
-      # Install IBM Cloud CLI and Container Registry CLI
-      - name: Install IBM Cloud CLI
-        run: |
-          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
-          ibmcloud plugin install container-registry -f
+          for file in $CHANGED_FILES; do
+            case "$file" in
+              pkg/scraper/twelvedata.go)
+                DEPLOY_TWELVEDATA=true
+                echo "Twelvedata scraper changed"
+                ;;
+              pkg/scraper/particula.go)
+                DEPLOY_PARTICULA=true
+                echo "Particula scraper changed"
+                ;;
+              *.md|.gitignore)
+                # Ignore docs
+                ;;
+              *)
+                DEPLOY_ALL=true
+                echo "Common code changed: $file"
+                ;;
+            esac
+          done
 
-      # Log in to IBM Cloud
-      - name: Log in to IBM Cloud
+          if [ "$DEPLOY_ALL" = true ]; then
+            DEPLOY_TWELVEDATA=true
+            DEPLOY_PARTICULA=true
+          fi
+
+          echo "DEPLOY_TWELVEDATA=$DEPLOY_TWELVEDATA" >> $GITHUB_ENV
+          echo "DEPLOY_PARTICULA=$DEPLOY_PARTICULA" >> $GITHUB_ENV
+
+          echo "Deploy twelvedata: $DEPLOY_TWELVEDATA"
+          echo "Deploy particula: $DEPLOY_PARTICULA"
+
+      - name: Checkout lumina-infra repository
         env:
-          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
-        run: |
-          ibmcloud login --apikey $IBM_CLOUD_API_KEY --no-region
-          ibmcloud target -r us-south
-          ibmcloud target -g Default
-
-      # Build and Tag the Docker image with the commit hash
-      - name: Build and Tag Docker image
-        run: |
-          docker build -f build/Dockerfile-luminaDataFeeder -t us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }} .
-
-      # Push Docker image to IBM Cloud Container Registry
-      - name: Push Docker image
-        run: |
-          ibmcloud cr login
-          docker push us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }}
-
-      # # Checkout the lumina-infra repository
-      # - name: Checkout lumina-infra repository
-      #   env:
-      #     LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
-      #   run: |
-      #     rm -rf lumina-infra
-      #     git clone -q https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra lumina-infra
-
-      # # Install kubectl
-      # - name: Install kubectl
-      #   run: |
-      #     curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
-      #     chmod +x ./kubectl
-      #     sudo mv ./kubectl /usr/local/bin/kubectl
-
-      # - name: IBM Cluster kubectl config 
-      #   env:
-      #     TOKEN: ${{ secrets.K8S_SERVICE_ACCOUNT_TOKEN_PROD }}
-      #     CLUSTER_NAME: ${{ secrets.K8s_CLUSTER_NAME_IBM }}
-      #     CONTEXT: ${{ secrets.K8s_CONTEXT_IBM }}
-      #     API_SERVER:  ${{ secrets.K8S_API_SERVER_IBM }} 
-      #     KUBE_CA_CERT_BASE64: ${{ secrets.KUBE_CA_CERT_BASE64_IBM }}
-      #     SERVICE_ACCOUNT: ${{ secrets.K8S_SA }}
-      #   run: |
-      #     # Ensure token does not contain unexpected newline characters
-      #     TOKEN=$(echo "$TOKEN" | tr -d '\n')
-      #     # Decode the base64-encoded CA certificate and save it to a file
-      #     echo "$KUBE_CA_CERT_BASE64" | base64 --decode > /tmp/ca.pem
-      #     # Set cluster using the CA PEM file
-      #     kubectl config set-cluster "$CLUSTER_NAME" \
-      #       --server="$API_SERVER" \
-      #       --certificate-authority=/tmp/ca.pem
-      #     # Set credentials
-      #     kubectl config set-credentials $SERVICE_ACCOUNT --token="$TOKEN"
-      #     # Set context
-      #     kubectl config set-context $CONTEXT --cluster="$CLUSTER_NAME" --user=$SERVICE_ACCOUNT 
-      #     # Use context
-      #     kubectl config use-context $CONTEXT
-
-      # # Helm upgrade command for decentral-data-feeder
-      # - name: Helm upgrade/install decentral-data-feeder
-      #   run: |
-      #     cd lumina-infra/helmcharts/decentral-feeders/201-data-feeder-testnet-ibm
-      #     helm upgrade --install -n dia-lumina \
-      #       --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
-      #       201-data-feeder-testnet .
-          
-      #     # Clean up CA certificate 
-      #     if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
-
-      # - name: Cleanup IBM Cluster CA Certificate
-      #   run: |
-      #     # Securely remove the CA certificate file
-      #     if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
-
-      # Cleanup the cloned repository and log out from IBM
-      - name: Cleanup cloned repository and log out from IBM
+          LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
         run: |
           rm -rf lumina-infra
-          ibmcloud logout
+          git clone -q https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra lumina-infra
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push to AWS ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: commit-hash-${{ env.COMMIT_HASH }}
+        run: |
+          docker build -f build/Dockerfile-luminaDataFeeder -t ${ECR_REGISTRY}/lumina/decentral-data-feeder:${IMAGE_TAG} .
+          docker push ${ECR_REGISTRY}/lumina/decentral-data-feeder:${IMAGE_TAG}
+          echo "Pushed image to AWS ECR:"
+          echo "  ${ECR_REGISTRY}/lumina/decentral-data-feeder:${IMAGE_TAG}"
+
+      - name: Update AWS testnet feeder values and push to lumina-infra
+        env:
+          LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          cd lumina-infra
+
+          git config user.name "DIA Lumina Bot"
+          git config user.email "infrastructure@diadata.org"
+
+          # Update twelvedata testnet feeders if needed
+          if [ "$DEPLOY_TWELVEDATA" = true ]; then
+            echo "Updating twelvedata testnet feeders..."
+            TWELVEDATA_FEEDERS="201-data-feeder-twelvedata-testnet-aws 204-data-feeder-twelvedata-testnet-aws 205-data-feeder-twelvedata-testnet-aws 206-data-feeder-twelvedata-testnet-aws 207-data-feeder-twelvedata-testnet-aws"
+            for feeder in $TWELVEDATA_FEEDERS; do
+              VALUES_FILE="helmcharts/data-feeders-aws/twelvedata/${feeder}/values.yaml"
+              if [ -f "$VALUES_FILE" ]; then
+                echo "Updating $VALUES_FILE"
+                sed -i "s|image: [^,]*|image: ${ECR_REGISTRY}/lumina/decentral-data-feeder|" "$VALUES_FILE"
+                sed -i "s|tag: [^}]*|tag: commit-hash-${{ env.COMMIT_HASH }}|" "$VALUES_FILE"
+              fi
+            done
+          fi
+
+          # Update particula testnet feeders if needed
+          if [ "$DEPLOY_PARTICULA" = true ]; then
+            echo "Updating particula testnet feeders..."
+            PARTICULA_FEEDERS="401-data-feeder-particula-testnet-aws 402-data-feeder-particula-testnet-aws 403-data-feeder-particula-testnet-aws 404-data-feeder-particula-testnet-aws 405-data-feeder-particula-testnet-aws"
+            for feeder in $PARTICULA_FEEDERS; do
+              VALUES_FILE="helmcharts/data-feeders-aws/particula/${feeder}/values.yaml"
+              if [ -f "$VALUES_FILE" ]; then
+                echo "Updating $VALUES_FILE"
+                sed -i "s|image: [^,]*|image: ${ECR_REGISTRY}/lumina/decentral-data-feeder|" "$VALUES_FILE"
+                sed -i "s|tag: [^}]*|tag: commit-hash-${{ env.COMMIT_HASH }}|" "$VALUES_FILE"
+              fi
+            done
+          fi
+
+          echo "Changes to be committed:"
+          git diff helmcharts/data-feeders-aws/ || true
+
+          if ! git diff --quiet; then
+            git add helmcharts/data-feeders-aws/
+            git commit -m "PR #${{ github.event.pull_request.number }}: Update data-feeders to commit-hash-${{ env.COMMIT_HASH }}"
+            git push https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra.git HEAD:master
+            echo "Pushed updates to lumina-infra. ArgoCD will sync data-feeders automatically."
+          else
+            echo "No changes to commit"
+          fi
+
+          cd ..
+
+      - name: Cleanup cloned repository
+        run: |
+          rm -rf lumina-infra
