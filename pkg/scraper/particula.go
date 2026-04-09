@@ -291,10 +291,7 @@ func makeParticulaRatingMap(token particulaIssuer, tokenRating particulaTokenRat
 }
 
 func (scraper *ParticulaScraper) accessTokenValid() bool {
-	if time.Now().Before(scraper.accessTokenTimestamp.Add(scraper.accessTokenValidity - PARTICULA_API_ACCESS_BUFFER*time.Second)) {
-		return true
-	}
-	return false
+	return time.Now().Before(scraper.accessTokenTimestamp.Add(scraper.accessTokenValidity - PARTICULA_API_ACCESS_BUFFER*time.Second))
 }
 
 // encodeRating encodes a rating given by a string to an integer.
