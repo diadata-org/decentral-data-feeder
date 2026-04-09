@@ -4,136 +4,31 @@ on:
   pull_request:
     branches:
       - master
-  workflow_dispatch:  # This allows manual triggering
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  ACTIONS_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG }}  # Set debug mode globally
 
 jobs:
-  lint_build_and_push:
+  lint:
     runs-on: ubuntu-latest
-    environment:
-      name: dia-testspace
     steps:
-      # Checkout decentral-data-feeder repo
       - uses: actions/checkout@v4
 
-      # Set up Go
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
 
-      # Get Short Commit Hash of the Merge Commit
-      - name: Get Short Commit Hash
+      - name: Verify dependencies
         run: |
-          COMMIT_HASH=$(git rev-parse --short HEAD)
-          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+          go mod tidy
+          go build ./...
 
-      # Go module download and verify
-      - name: Download Go modules
-        run: |
-          go mod download
-          go mod verify
-
-      # Run Go linting and formatting
-      - name: Run Go linting
-        run: |
-          go fmt ./...
-          go vet ./...
-
-      # Run Go build to ensure compilation works
-      - name: Build Go application
-        run: |
-          go build -v ./...
-
-      # Install IBM Cloud CLI and Container Registry CLI
-      - name: Install IBM Cloud CLI
-        run: |
-          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
-          ibmcloud plugin install container-registry -f
-
-      # Log in to IBM Cloud
-      - name: Log in to IBM Cloud
-        env:
-          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
-        run: |
-          ibmcloud login --apikey $IBM_CLOUD_API_KEY --no-region
-          ibmcloud target -r us-south
-          ibmcloud target -g Default
-
-      # Build and Tag the Docker image with the commit hash
-      - name: Build and Tag Docker image
-        run: |
-          docker build -f build/Dockerfile-luminaDataFeeder -t us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }} .
-
-      # Push Docker image to IBM Cloud Container Registry
-      - name: Push Docker image
-        run: |
-          ibmcloud cr login
-          docker push us.icr.io/dia-registry/oracles/decentral-data-feeder:commit-hash-${{ env.COMMIT_HASH }}
-
-      # # Checkout the lumina-infra repository
-      # - name: Checkout lumina-infra repository
-      #   env:
-      #     LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
-      #   run: |
-      #     rm -rf lumina-infra
-      #     git clone -q https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra lumina-infra
-
-      # # Install kubectl
-      # - name: Install kubectl
-      #   run: |
-      #     curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
-      #     chmod +x ./kubectl
-      #     sudo mv ./kubectl /usr/local/bin/kubectl
-
-      # - name: IBM Cluster kubectl config 
-      #   env:
-      #     TOKEN: ${{ secrets.K8S_SERVICE_ACCOUNT_TOKEN_PROD }}
-      #     CLUSTER_NAME: ${{ secrets.K8s_CLUSTER_NAME_IBM }}
-      #     CONTEXT: ${{ secrets.K8s_CONTEXT_IBM }}
-      #     API_SERVER:  ${{ secrets.K8S_API_SERVER_IBM }} 
-      #     KUBE_CA_CERT_BASE64: ${{ secrets.KUBE_CA_CERT_BASE64_IBM }}
-      #     SERVICE_ACCOUNT: ${{ secrets.K8S_SA }}
-      #   run: |
-      #     # Ensure token does not contain unexpected newline characters
-      #     TOKEN=$(echo "$TOKEN" | tr -d '\n')
-      #     # Decode the base64-encoded CA certificate and save it to a file
-      #     echo "$KUBE_CA_CERT_BASE64" | base64 --decode > /tmp/ca.pem
-      #     # Set cluster using the CA PEM file
-      #     kubectl config set-cluster "$CLUSTER_NAME" \
-      #       --server="$API_SERVER" \
-      #       --certificate-authority=/tmp/ca.pem
-      #     # Set credentials
-      #     kubectl config set-credentials $SERVICE_ACCOUNT --token="$TOKEN"
-      #     # Set context
-      #     kubectl config set-context $CONTEXT --cluster="$CLUSTER_NAME" --user=$SERVICE_ACCOUNT 
-      #     # Use context
-      #     kubectl config use-context $CONTEXT
-
-      # # Helm upgrade command for decentral-data-feeder
-      # - name: Helm upgrade/install decentral-data-feeder
-      #   run: |
-      #     cd lumina-infra/helmcharts/decentral-feeders/201-data-feeder-testnet-ibm
-      #     helm upgrade --install -n dia-lumina \
-      #       --set repository.tag="commit-hash-${{ env.COMMIT_HASH }}" \
-      #       201-data-feeder-testnet .
-          
-      #     # Clean up CA certificate 
-      #     if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
-
-      # - name: Cleanup IBM Cluster CA Certificate
-      #   run: |
-      #     # Securely remove the CA certificate file
-      #     if [ -f /tmp/ca.pem ]; then shred -u /tmp/ca.pem; fi
-
-      # Cleanup the cloned repository and log out from IBM
-      - name: Cleanup cloned repository and log out from IBM
-        run: |
-          rm -rf lumina-infra
-          ibmcloud logout
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest

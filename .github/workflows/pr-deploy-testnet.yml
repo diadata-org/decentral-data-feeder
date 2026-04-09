@@ -1,0 +1,154 @@
+name: decentral-data-feeder-deploy-testnet
+
+on:
+  pull_request:
+    types: [labeled]
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deploy target'
+        required: true
+        type: choice
+        options:
+          - twelvedata
+          - particula
+          - rwaws
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  lint:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'deploy-testnet-twelvedata' ||
+      github.event.label.name == 'deploy-testnet-particula' ||
+      github.event.label.name == 'deploy-testnet-rwaws'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Verify dependencies
+        run: |
+          go mod tidy
+          go build ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  build-and-deploy:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Short Commit Hash
+        run: |
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+
+      - name: Determine deploy target
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "DEPLOY_TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
+          elif [ "${{ github.event.label.name }}" == "deploy-testnet-twelvedata" ]; then
+            echo "DEPLOY_TARGET=twelvedata" >> $GITHUB_ENV
+          elif [ "${{ github.event.label.name }}" == "deploy-testnet-particula" ]; then
+            echo "DEPLOY_TARGET=particula" >> $GITHUB_ENV
+          elif [ "${{ github.event.label.name }}" == "deploy-testnet-rwaws" ]; then
+            echo "DEPLOY_TARGET=rwaws" >> $GITHUB_ENV
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Tag Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: commit-hash-${{ env.COMMIT_HASH }}
+        run: |
+          docker build -f build/Dockerfile-luminaDataFeeder -t ${ECR_REGISTRY}/lumina/decentral-data-feeder:${IMAGE_TAG} .
+
+      - name: Push image to AWS ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: commit-hash-${{ env.COMMIT_HASH }}
+        run: |
+          docker push ${ECR_REGISTRY}/lumina/decentral-data-feeder:${IMAGE_TAG}
+          echo "Pushed image to AWS ECR:"
+          echo "  ${ECR_REGISTRY}/lumina/decentral-data-feeder:${IMAGE_TAG}"
+
+      - name: Checkout lumina-infra repository
+        env:
+          LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
+        run: |
+          rm -rf lumina-infra
+          git clone -q https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra lumina-infra
+
+      - name: Update AWS testnet data feeder values and push to lumina-infra
+        env:
+          LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          cd lumina-infra
+
+          git config user.name "DIA Lumina Bot"
+          git config user.email "infrastructure@diadata.org"
+
+          case "${{ env.DEPLOY_TARGET }}" in
+            twelvedata)
+              FEEDERS="201-data-feeder-twelvedata-testnet-aws 204-data-feeder-twelvedata-testnet-aws 205-data-feeder-twelvedata-testnet-aws 206-data-feeder-twelvedata-testnet-aws 207-data-feeder-twelvedata-testnet-aws"
+              FOLDER="twelvedata"
+              ;;
+            particula)
+              FEEDERS="401-data-feeder-particula-testnet-aws 402-data-feeder-particula-testnet-aws 403-data-feeder-particula-testnet-aws 404-data-feeder-particula-testnet-aws 405-data-feeder-particula-testnet-aws"
+              FOLDER="particula"
+              ;;
+            rwaws)
+              FEEDERS="501-data-feeder-twelvedata-ws-testnet-aws"
+              FOLDER="rwaws"
+              ;;
+          esac
+
+          for feeder in $FEEDERS; do
+            VALUES_FILE="helmcharts/data-feeders-aws/${FOLDER}/${feeder}/values.yaml"
+            if [ -f "$VALUES_FILE" ]; then
+              echo "Updating $VALUES_FILE"
+              sed -i "s|image: [^,]*|image: ${ECR_REGISTRY}/lumina/decentral-data-feeder|" "$VALUES_FILE"
+              sed -i "s|tag: [^}]*|tag: commit-hash-${{ env.COMMIT_HASH }}|" "$VALUES_FILE"
+            fi
+          done
+
+          echo "Changes to be committed:"
+          git diff helmcharts/data-feeders-aws/${FOLDER}/
+
+          if ! git diff --quiet; then
+            git add helmcharts/data-feeders-aws/${FOLDER}/
+            git commit -m "Deploy decentral-data-feeder (${FOLDER}) to testnet (commit-hash-${{ env.COMMIT_HASH }})"
+            git push https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra.git HEAD:master
+            echo "Pushed updates to lumina-infra. ArgoCD will sync ${FOLDER} testnet feeders automatically."
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Cleanup cloned repository
+        run: |
+          rm -rf lumina-infra
