@@ -13,8 +13,6 @@ func NewDataScraper(source string) DataScraper {
 		return NewCMCScraper()
 	case COINGECKO:
 		return NewCGScraper()
-	case RANDAMU:
-		return NewRandamuScraper()
 	case TWELVEDATA:
 		return NewTwelvedataScraper()
 	case PARTICULA:
