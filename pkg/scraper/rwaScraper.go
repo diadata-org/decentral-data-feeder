@@ -544,7 +544,7 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []
 	}
 
 	keys = append(keys, rwaResponse.Symbol)
-	values = append(values, int64(rwaResponse.Price*1e5))
+	values = append(values, int64(rwaResponse.Price*1e8))
 	return keys, values
 }
 
