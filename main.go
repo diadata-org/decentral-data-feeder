@@ -1,12 +1,11 @@
 package main
 
 import (
-	diaOracleRandomness "github.com/diadata-org/decentral-data-feeder/contracts/DIAOracleRandomness"
 	"github.com/diadata-org/decentral-data-feeder/pkg/metrics"
 	"github.com/diadata-org/decentral-data-feeder/pkg/onchain"
 	scraper "github.com/diadata-org/decentral-data-feeder/pkg/scraper"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
-	"github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
+	diaoraclev3 "github.com/diadata-org/lumina-library/contracts/lumina/diaoraclev3"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -34,20 +33,10 @@ func main() {
 	//  DS = scraper.NewDataScraper(scraper.COINGECKO)
 	//  // TO DO: add oracle updater
 
-	case scraper.RANDAMU:
-		DS = scraper.NewDataScraper(scraper.RANDAMU)
-
-		var contract diaOracleRandomness.DIAOracleRandomness
-		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
-		if err != nil {
-			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
-		}
-		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
-
 	case scraper.TWELVEDATA:
 		DS = scraper.NewDataScraper(scraper.TWELVEDATA)
 
-		var contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService
+		var contract diaoraclev3.DiaOracleV3MultiupdateService
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
@@ -57,7 +46,7 @@ func main() {
 	case scraper.PARTICULA:
 		DS = scraper.NewDataScraper(scraper.PARTICULA)
 
-		var contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService
+		var contract diaoraclev3.DiaOracleV3MultiupdateService
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
@@ -67,7 +56,7 @@ func main() {
 	case scraper.RWAWS:
 		DS = scraper.NewDataScraper(scraper.RWAWS)
 
-		var contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService
+		var contract diaoraclev3.DiaOracleV3MultiupdateService
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)

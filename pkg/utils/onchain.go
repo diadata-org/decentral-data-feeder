@@ -26,7 +26,7 @@ func SetupOnchain() (deployedContract string, conn *ethclient.Client, chainId in
 		log.Fatalf("MakeEthClient: %v", err)
 	}
 
-	chainId, err = strconv.ParseInt(Getenv("CHAIN_ID", "100640"), 10, 64)
+	chainId, err = strconv.ParseInt(Getenv("CHAIN_ID", "10050"), 10, 64)
 	if err != nil {
 		log.Fatalf("Failed to parse chainId: %v", err)
 	}

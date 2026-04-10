@@ -4,7 +4,7 @@ import (
 	"time"
 
 	diaOracleRandomness "github.com/diadata-org/decentral-data-feeder/contracts/DIAOracleRandomness"
-	diaOracleV2MultiupdateService "github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
+	diaoraclev3 "github.com/diadata-org/lumina-library/contracts/lumina/diaoraclev3"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -22,8 +22,8 @@ func DeployOrBindContract(
 
 		// bind primary and backup
 		switch contract.(type) {
-		case diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
-			contract, err = diaOracleV2MultiupdateService.NewDiaOracleV2MultiupdateService(common.HexToAddress(deployedContract), conn)
+		case diaoraclev3.DiaOracleV3MultiupdateService:
+			contract, err = diaoraclev3.NewDiaOracleV3MultiupdateService(common.HexToAddress(deployedContract), conn)
 		case diaOracleRandomness.DIAOracleRandomness:
 			contract, err = diaOracleRandomness.NewDIAOracleRandomness(common.HexToAddress(deployedContract), conn)
 		}
@@ -37,8 +37,8 @@ func DeployOrBindContract(
 		var addr common.Address
 		var tx *types.Transaction
 		switch contract.(type) {
-		case diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
-			addr, tx, contract, err = diaOracleV2MultiupdateService.DeployDiaOracleV2MultiupdateService(auth, conn)
+		case diaoraclev3.DiaOracleV3MultiupdateService:
+			addr, tx, contract, err = diaoraclev3.DeployDiaOracleV3MultiupdateService(auth, conn)
 		case diaOracleRandomness.DIAOracleRandomness:
 			addr, tx, contract, err = diaOracleRandomness.DeployDIAOracleRandomness(auth, conn)
 		}
@@ -60,12 +60,12 @@ func DeployOrBindContractOld(
 	deployedContract string,
 	conn *ethclient.Client,
 	auth *bind.TransactOpts,
-	contract **diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
+	contract **diaoraclev3.DiaOracleV3MultiupdateService,
 ) error {
 	var err error
 	if deployedContract != "" {
 		// bind primary and backup
-		*contract, err = diaOracleV2MultiupdateService.NewDiaOracleV2MultiupdateService(common.HexToAddress(deployedContract), conn)
+		*contract, err = diaoraclev3.NewDiaOracleV3MultiupdateService(common.HexToAddress(deployedContract), conn)
 		if err != nil {
 			return err
 		}
@@ -73,7 +73,7 @@ func DeployOrBindContractOld(
 		// deploy contract
 		var addr common.Address
 		var tx *types.Transaction
-		addr, tx, *contract, err = diaOracleV2MultiupdateService.DeployDiaOracleV2MultiupdateService(auth, conn)
+		addr, tx, *contract, err = diaoraclev3.DeployDiaOracleV3MultiupdateService(auth, conn)
 		if err != nil {
 			log.Fatalf("could not deploy contract: %v", err)
 			return err
