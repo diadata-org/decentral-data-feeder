@@ -4,9 +4,9 @@ import (
 	"crypto/ecdsa"
 	"os"
 	"os/signal"
+	"syscall"
 	"strconv"
 	"sync"
-	"syscall"
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/metrics"
 	"github.com/diadata-org/decentral-data-feeder/pkg/onchain"
@@ -58,7 +58,6 @@ func main() {
 		}(source, deployedContract, conn, chainId, privateKey, auth)
 	}
 	wg.Wait()
-
 }
 
 func handleTwelveData(deployedContract string, conn *ethclient.Client, auth *bind.TransactOpts, chainId int64, source string, decimalsOracleValue int) {
