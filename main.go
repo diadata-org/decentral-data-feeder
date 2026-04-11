@@ -15,8 +15,7 @@ import (
 )
 
 var (
-	source   = utils.Getenv("SOURCE", "")
-	decimals = utils.Getenv("DECIMALS", "18")
+	source = utils.Getenv("SOURCE", "")
 )
 
 func main() {
