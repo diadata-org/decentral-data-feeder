@@ -86,7 +86,6 @@ func OracleUpdateExecutor(
 					keys = append(keys, twelvedataResponse.Symbol)
 					values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
 				}
-
 			case scraper.PARTICULA:
 				tokenRating := make(map[string]int64)
 				err := json.Unmarshal(data, &tokenRating)
