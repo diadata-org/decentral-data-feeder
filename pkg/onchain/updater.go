@@ -36,7 +36,7 @@ func OracleUpdateExecutor(
 	chainId int64,
 	// compatibilityMode bool,
 	source string,
-	decimal int64,
+	decimals int64,
 	dataChannel <-chan []byte,
 	updateDoneChannel <-chan bool,
 ) {
@@ -98,7 +98,7 @@ func OracleUpdateExecutor(
 			log.Infof("collected %v responses. make oracle update...", len(values))
 			switch contract := contractAny.(type) {
 			case *diaoraclev3.DiaOracleV3MultiupdateService:
-				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix(), decimal)
+				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix(), decimals)
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
 					return
