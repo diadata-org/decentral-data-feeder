@@ -88,7 +88,6 @@ func OracleUpdateExecutor(
 						values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
 					}
 				}
-
 			case scraper.BELO:
 
 				var beloQuote scraper.BeloQuote
