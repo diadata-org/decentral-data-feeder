@@ -4,9 +4,9 @@ import (
 	"crypto/ecdsa"
 	"os"
 	"os/signal"
-	"syscall"
 	"strconv"
 	"sync"
+	"syscall"
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/metrics"
 	"github.com/diadata-org/decentral-data-feeder/pkg/onchain"
