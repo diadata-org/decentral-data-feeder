@@ -15,11 +15,15 @@ import (
 )
 
 var (
-	source = utils.Getenv("SOURCE", "")
+	source   = utils.Getenv("SOURCE", "")
+	decimals = utils.Getenv("DECIMALS", "18")
 )
 
 func main() {
-
+	decimals, err := strconv.ParseInt(utils.Getenv("DECIMALS", "18"), 10, 64)
+	if err != nil {
+		log.Fatalf("Failed to parse decimals: %v", err)
+	}
 	// Set up blockchain connections and contracts.
 	deployedContract, conn, chainId, privateKey, auth := utils.SetupOnchain()
 
@@ -72,7 +76,7 @@ func main() {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
 
-		s := scraper.NewRWAWSScraper(auth, c, chainId, source)
+		s := scraper.NewRWAWSScraper(auth, c, chainId, source, decimals)
 		defer s.Close()
 
 		quit := make(chan os.Signal, 1)
