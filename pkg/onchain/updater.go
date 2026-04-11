@@ -15,7 +15,7 @@ import (
 
 var (
 	keys   []string
-	values []int64
+	values []*big.Float
 )
 
 func init() {
@@ -36,6 +36,7 @@ func OracleUpdateExecutor(
 	chainId int64,
 	// compatibilityMode bool,
 	source string,
+	decimal int64,
 	dataChannel <-chan []byte,
 	updateDoneChannel <-chan bool,
 ) {
@@ -57,24 +58,24 @@ func OracleUpdateExecutor(
 				if twelvedataResponse.Type == scraper.NyseOpen {
 					// business time.
 					keys = append(keys, "US_Open")
-					nyseOpen := int64(0)
+					nyseOpen := float64(0)
 					if twelvedataResponse.NYSEOpen {
-						nyseOpen = int64(1)
+						nyseOpen = float64(1)
 					}
-					values = append(values, nyseOpen)
+					values = append(values, new(big.Float).SetFloat64(nyseOpen))
 
 					// holiday.
 					keys = append(keys, "US_Holiday")
-					nyseHoliday := int64(0)
+					nyseHoliday := float64(0)
 					if twelvedataResponse.NYSEHoliday {
-						nyseHoliday = int64(1)
+						nyseHoliday = float64(1)
 					}
-					values = append(values, nyseHoliday)
+					values = append(values, new(big.Float).SetFloat64(nyseHoliday))
 				}
 
 				log.Info("got rwa data: ", twelvedataResponse)
 				keys = append(keys, twelvedataResponse.Symbol)
-				values = append(values, int64(twelvedataResponse.Price*1e5))
+				values = append(values, new(big.Float).SetFloat64(twelvedataResponse.Price))
 
 			case scraper.PARTICULA:
 				tokenRating := make(map[string]int64)
@@ -87,7 +88,7 @@ func OracleUpdateExecutor(
 				log.Info("got particula token rating data: ", tokenRating)
 				for key, value := range tokenRating {
 					keys = append(keys, key)
-					values = append(values, value)
+					values = append(values, new(big.Float).SetFloat64(float64(value)))
 				}
 			}
 
@@ -97,7 +98,7 @@ func OracleUpdateExecutor(
 			log.Infof("collected %v responses. make oracle update...", len(values))
 			switch contract := contractAny.(type) {
 			case *diaoraclev3.DiaOracleV3MultiupdateService:
-				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix())
+				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix(), decimal)
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
 					return
@@ -107,7 +108,7 @@ func OracleUpdateExecutor(
 
 			// reset keys and values for next update.
 			keys = []string{}
-			values = []int64{}
+			values = []*big.Float{}
 		}
 	}
 }
@@ -116,17 +117,23 @@ func updateOracleMultiValues(
 	contract diaoraclev3.DiaOracleV3MultiupdateService,
 	auth *bind.TransactOpts,
 	keys []string,
-	values []int64,
-	timestamp int64) error {
+	values []*big.Float,
+	timestamp int64,
+	decimals int64) error {
 
 	var cValues []*big.Int
 	var gasPrice *big.Int
 	var err error
 
+	multiplier := new(big.Float).SetInt(
+		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
+	)
+
 	for _, value := range values {
-		// Create compressed argument with values/timestamps
-		cValue := big.NewInt(value)
-		cValue = cValue.Lsh(cValue, 128)
+		scaled := new(big.Float).Mul(value, multiplier)
+		scaledInt, _ := scaled.Int(nil)
+
+		cValue := new(big.Int).Lsh(scaledInt, 128)
 		cValue = cValue.Add(cValue, big.NewInt(timestamp))
 		cValues = append(cValues, cValue)
 	}
@@ -143,11 +150,7 @@ func updateOracleMultiValues(
 		return err
 	}
 
-	log.Infof("updater - Gas price: %d.", tx.GasPrice())
-	// log.Printf("Data: %x\n", tx.Data())
-	log.Infof("updater - Nonce: %d.", tx.Nonce())
-	log.Infof("updater - Tx To: %s.", tx.To().String())
-	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
+	logTx(tx)
 	return nil
 }
 

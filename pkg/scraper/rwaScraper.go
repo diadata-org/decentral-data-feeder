@@ -13,7 +13,7 @@ import (
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/models"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
-	"github.com/diadata-org/diadata/pkg/dia/scraper/blockchain-scrapers/blockchains/ethereum/diaOracleV2MultiupdateService"
+	diaoraclev3 "github.com/diadata-org/lumina-library/contracts/lumina/diaoraclev3"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ws "github.com/gorilla/websocket"
 	calendar "github.com/scmhub/calendar"
@@ -116,9 +116,11 @@ type RWAWSScraper struct {
 	lastPublishedPrices map[string]float64
 	lastPublishedTimes  map[string]time.Time
 	forcePublishAfter   time.Duration
+
+	decimals int64
 }
 
-func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string) *RWAWSScraper {
+func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string, decimals int64) *RWAWSScraper {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	publishIntervalMs, err := strconv.Atoi(utils.Getenv("RWA_WS_PUBLISH_INTERVAL_MS", "600"))
@@ -155,6 +157,7 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		lastPublishedPrices: make(map[string]float64),
 		lastPublishedTimes:  make(map[string]time.Time),
 		forcePublishAfter:   time.Duration(forcePublishAfterSec) * time.Second,
+		decimals:            decimals,
 	}
 
 	if s.apiKey == "" {
@@ -508,7 +511,7 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 	}
 
 	keys := []string{}
-	values := []int64{}
+	values := []*big.Float{}
 
 	for _, quote := range filtered {
 		k, v := scraper.preparePublishData(quote)
@@ -519,41 +522,41 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 	scraper.publishData(keys, values)
 }
 
-func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []string, values []int64) {
+func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []string, values []*big.Float) {
 	log.Info("got rwa ws data: ", rwaResponse)
 
 	if rwaResponse.Type == Equities || rwaResponse.Type == ETF {
 		keys = append(keys, "Market_Open")
-		marketOpen := int64(0)
+		marketOpen := new(big.Float).SetFloat64(0)
 		if rwaResponse.MarketOpen {
-			marketOpen = int64(1)
+			marketOpen = new(big.Float).SetFloat64(1)
 		}
 		values = append(values, marketOpen)
 
 		keys = append(keys, "Market_Holiday")
-		marketHoliday := int64(0)
+		marketHoliday := new(big.Float).SetFloat64(0)
 		if rwaResponse.MarketHoliday {
-			marketHoliday = int64(1)
+			marketHoliday = new(big.Float).SetFloat64(1)
 		}
 		values = append(values, marketHoliday)
 	}
 
 	keys = append(keys, rwaResponse.Symbol)
-	values = append(values, int64(rwaResponse.Price*1e8))
+	values = append(values, new(big.Float).SetFloat64(rwaResponse.Price))
 	return keys, values
 }
 
-func (scraper *RWAWSScraper) publishData(keys []string, values []int64) {
+func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
 	log.Infof("collected %v responses. make oracle update...", len(values))
 
 	switch contract := scraper.contractAny.(type) {
-	case *diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService:
+	case *diaoraclev3.DiaOracleV3MultiupdateService:
 		keysCopy := make([]string, len(keys))
 		copy(keysCopy, keys)
-		valuesCopy := make([]int64, len(values))
+		valuesCopy := make([]*big.Float, len(values))
 		copy(valuesCopy, values)
 		go func() {
-			err := updateOracleMultiValuesForRWAWS(*contract, scraper.auth, keysCopy, valuesCopy, time.Now().Unix())
+			err := updateOracleMultiValuesForRWAWS(*contract, scraper.auth, keysCopy, valuesCopy, time.Now().Unix(), scraper.decimals)
 			if err != nil {
 				log.Warnf("updater - Failed to update Oracle: %v.", err)
 			}
@@ -687,19 +690,26 @@ func chooseName(msg rwaWSMessage) string {
 }
 
 func updateOracleMultiValuesForRWAWS(
-	contract diaOracleV2MultiupdateService.DiaOracleV2MultiupdateService,
+	contract diaoraclev3.DiaOracleV3MultiupdateService,
 	auth *bind.TransactOpts,
 	keys []string,
-	values []int64,
-	timestamp int64) error {
+	values []*big.Float,
+	timestamp int64,
+	decimals int64) error {
 
 	var cValues []*big.Int
 	var gasPrice *big.Int
 
+	multiplier := new(big.Float).SetInt(
+		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
+	)
+
 	for _, value := range values {
+		scaled := new(big.Float).Mul(value, multiplier)
+		scaledInt, _ := scaled.Int(nil)
+
 		// Create compressed argument with values/timestamps
-		cValue := big.NewInt(value)
-		cValue = cValue.Lsh(cValue, 128)
+		cValue := new(big.Int).Lsh(scaledInt, 128)
 		cValue = cValue.Add(cValue, big.NewInt(timestamp))
 		cValues = append(cValues, cValue)
 	}
