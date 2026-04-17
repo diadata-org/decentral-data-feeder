@@ -24,6 +24,11 @@ const (
 	rwaWSURL      = "wss://ws.twelvedata.com/v1/quotes/price"
 )
 
+var (
+	lastTimestampMu sync.Mutex
+	lastTimestamp   int64
+)
+
 type RWAWSQuote struct {
 	Symbol        string    `json:"Symbol"`
 	Name          string    `json:"Name"`
@@ -517,9 +522,10 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 
 	keys := []string{}
 	values := []*big.Float{}
+	marketStatusAdded := false
 
 	for _, quote := range filtered {
-		k, v := scraper.preparePublishData(quote)
+		k, v := scraper.preparePublishData(quote, &marketStatusAdded)
 		keys = append(keys, k...)
 		values = append(values, v...)
 	}
@@ -527,10 +533,10 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 	scraper.publishData(keys, values)
 }
 
-func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []string, values []*big.Float) {
+func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketStatusAdded *bool) (keys []string, values []*big.Float) {
 	log.Info("got rwa ws data: ", rwaResponse)
 
-	if rwaResponse.Type == Equities || rwaResponse.Type == ETF {
+	if (rwaResponse.Type == Equities || rwaResponse.Type == ETF) && !*marketStatusAdded {
 		keys = append(keys, "Market_Open")
 		marketOpen := new(big.Float).SetFloat64(0)
 		if rwaResponse.MarketOpen {
@@ -544,6 +550,8 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote) (keys []
 			marketHoliday = new(big.Float).SetFloat64(1)
 		}
 		values = append(values, marketHoliday)
+
+		*marketStatusAdded = true
 	}
 
 	keys = append(keys, rwaResponse.Symbol)
@@ -560,8 +568,11 @@ func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
 		copy(keysCopy, keys)
 		valuesCopy := make([]*big.Float, len(values))
 		copy(valuesCopy, values)
+
+		ts := nextTimestamp()
+
 		go func() {
-			err := updateOracleMultiValuesForRWAWS(*contract, scraper.auth, keysCopy, valuesCopy, time.Now().Unix(), scraper.decimals)
+			err := updateOracleMultiValuesForRWAWS(*contract, scraper.auth, keysCopy, valuesCopy, ts, scraper.decimals)
 			if err != nil {
 				log.Warnf("updater - Failed to update Oracle: %v.", err)
 			}
@@ -692,6 +703,18 @@ func chooseName(msg rwaWSMessage) string {
 		return msg.Symbol
 	}
 	return "unknown"
+}
+
+func nextTimestamp() int64 {
+	lastTimestampMu.Lock()
+	defer lastTimestampMu.Unlock()
+	now := time.Now().Unix()
+	if now <= lastTimestamp {
+		lastTimestamp++
+	} else {
+		lastTimestamp = now
+	}
+	return lastTimestamp
 }
 
 func updateOracleMultiValuesForRWAWS(
