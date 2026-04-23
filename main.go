@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+
 	"github.com/diadata-org/decentral-data-feeder/pkg/metrics"
 	"github.com/diadata-org/decentral-data-feeder/pkg/onchain"
 	scraper "github.com/diadata-org/decentral-data-feeder/pkg/scraper"
@@ -20,6 +22,13 @@ func main() {
 
 	// Start collecting and pushing metrics.
 	metrics.StartMetrics(conn, privateKey, deployedContract, chainId)
+
+	decimalsOracleValue, err := strconv.Atoi(utils.Getenv("DECIMALS_ORACLE_VALUE", "18"))
+	if err != nil {
+		log.Errorf("parse DECIMALS_ORACLE_VALUE: %v", err)
+		decimalsOracleValue = 18
+	}
+	log.Infof("Using DECIMALS_ORACLE_VALUE: %d", decimalsOracleValue)
 
 	// ----------------------------------- Metrics -----------------------------------
 
@@ -41,7 +50,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutor(auth, c, chainId, source, decimalsOracleValue, DS.DataChannel(), DS.UpdateDoneChannel())
 
 	case scraper.PARTICULA:
 		DS = scraper.NewDataScraper(scraper.PARTICULA)
@@ -51,7 +60,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutor(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutor(auth, c, chainId, source, decimalsOracleValue, DS.DataChannel(), DS.UpdateDoneChannel())
 
 	case scraper.RWAWS:
 		DS = scraper.NewDataScraper(scraper.RWAWS)
@@ -61,7 +70,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
-		onchain.OracleUpdateExecutorForHighFrequencyScraper(auth, c, chainId, source, DS.DataChannel(), DS.UpdateDoneChannel())
+		onchain.OracleUpdateExecutorForHighFrequencyScraper(auth, c, chainId, source, decimalsOracleValue, DS.DataChannel(), DS.UpdateDoneChannel())
 	}
 
 }

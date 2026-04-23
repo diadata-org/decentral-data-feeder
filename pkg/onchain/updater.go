@@ -15,7 +15,7 @@ import (
 
 var (
 	keys   []string
-	values []int64
+	values []*big.Int
 )
 
 func init() {
@@ -36,6 +36,7 @@ func OracleUpdateExecutor(
 	chainId int64,
 	// compatibilityMode bool,
 	source string,
+	decimalsOracleValue int,
 	dataChannel <-chan []byte,
 	updateDoneChannel <-chan bool,
 ) {
@@ -57,24 +58,24 @@ func OracleUpdateExecutor(
 				if twelvedataResponse.Type == scraper.NyseOpen {
 					// business time.
 					keys = append(keys, "US_Open")
-					nyseOpen := int64(0)
+					nyseOpen := big.NewInt(0)
 					if twelvedataResponse.NYSEOpen {
-						nyseOpen = int64(1)
+						nyseOpen = utils.ScaleInt(1, decimalsOracleValue)
 					}
 					values = append(values, nyseOpen)
 
 					// holiday.
 					keys = append(keys, "US_Holiday")
-					nyseHoliday := int64(0)
+					nyseHoliday := big.NewInt(0)
 					if twelvedataResponse.NYSEHoliday {
-						nyseHoliday = int64(1)
+						nyseHoliday = utils.ScaleInt(1, decimalsOracleValue)
 					}
 					values = append(values, nyseHoliday)
+				} else {
+					log.Info("got rwa data: ", twelvedataResponse)
+					keys = append(keys, twelvedataResponse.Symbol)
+					values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
 				}
-
-				log.Info("got rwa data: ", twelvedataResponse)
-				keys = append(keys, twelvedataResponse.Symbol)
-				values = append(values, int64(twelvedataResponse.Price*1e5))
 
 			case scraper.PARTICULA:
 				tokenRating := make(map[string]int64)
@@ -87,7 +88,7 @@ func OracleUpdateExecutor(
 				log.Info("got particula token rating data: ", tokenRating)
 				for key, value := range tokenRating {
 					keys = append(keys, key)
-					values = append(values, value)
+					values = append(values, utils.ScaleInt(value, decimalsOracleValue))
 				}
 
 			case scraper.RWAWS:
@@ -102,22 +103,22 @@ func OracleUpdateExecutor(
 
 				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
 					keys = append(keys, "Market_Open")
-					marketOpen := int64(0)
+					marketOpen := big.NewInt(0)
 					if rwaResponse.MarketOpen {
-						marketOpen = int64(1)
+						marketOpen = utils.ScaleInt(1, decimalsOracleValue)
 					}
 					values = append(values, marketOpen)
 
 					keys = append(keys, "Market_Holiday")
-					marketHoliday := int64(0)
+					marketHoliday := big.NewInt(0)
 					if rwaResponse.MarketHoliday {
-						marketHoliday = int64(1)
+						marketHoliday = utils.ScaleInt(1, decimalsOracleValue)
 					}
 					values = append(values, marketHoliday)
 				}
 
 				keys = append(keys, rwaResponse.Symbol)
-				values = append(values, int64(rwaResponse.Price*1e5))
+				values = append(values, utils.ScaleFloat(rwaResponse.Price, decimalsOracleValue))
 			}
 
 		case <-updateDoneChannel:
@@ -136,7 +137,7 @@ func OracleUpdateExecutor(
 
 			// reset keys and values for next update.
 			keys = []string{}
-			values = []int64{}
+			values = []*big.Int{}
 		}
 	}
 }
@@ -146,6 +147,7 @@ func OracleUpdateExecutorForHighFrequencyScraper(
 	contractAny any,
 	chainId int64,
 	source string,
+	decimalsOracleValue int,
 	dataChannel <-chan []byte,
 	updateDoneChannel <-chan bool,
 ) {
@@ -167,22 +169,22 @@ func OracleUpdateExecutorForHighFrequencyScraper(
 
 				if rwaResponse.Type == scraper.Equities || rwaResponse.Type == scraper.ETF {
 					keys = append(keys, "Market_Open")
-					marketOpen := int64(0)
+					marketOpen := big.NewInt(0)
 					if rwaResponse.MarketOpen {
-						marketOpen = int64(1)
+						marketOpen = utils.ScaleInt(1, decimalsOracleValue)
 					}
 					values = append(values, marketOpen)
 
 					keys = append(keys, "Market_Holiday")
-					marketHoliday := int64(0)
+					marketHoliday := big.NewInt(0)
 					if rwaResponse.MarketHoliday {
-						marketHoliday = int64(1)
+						marketHoliday = utils.ScaleInt(1, decimalsOracleValue)
 					}
 					values = append(values, marketHoliday)
+				} else {
+					keys = append(keys, rwaResponse.Symbol)
+					values = append(values, utils.ScaleFloat(rwaResponse.Price, decimalsOracleValue))
 				}
-
-				keys = append(keys, rwaResponse.Symbol)
-				values = append(values, int64(rwaResponse.Price*1e5))
 			}
 		case <-updateDoneChannel:
 			log.Infof("collected %v responses. make oracle update...", len(values))
@@ -202,7 +204,7 @@ func OracleUpdateExecutorForHighFrequencyScraper(
 
 			// reset keys and values for next update.
 			keys = []string{}
-			values = []int64{}
+			values = []*big.Int{}
 		}
 	}
 }
@@ -211,8 +213,9 @@ func updateOracleMultiValues(
 	contract diaoraclev3.DiaOracleV3MultiupdateService,
 	auth *bind.TransactOpts,
 	keys []string,
-	values []int64,
-	timestamp int64) error {
+	values []*big.Int,
+	timestamp int64,
+) error {
 
 	var cValues []*big.Int
 	var gasPrice *big.Int
@@ -220,7 +223,7 @@ func updateOracleMultiValues(
 
 	for _, value := range values {
 		// Create compressed argument with values/timestamps
-		cValue := big.NewInt(value)
+		cValue := value
 		cValue = cValue.Lsh(cValue, 128)
 		cValue = cValue.Add(cValue, big.NewInt(timestamp))
 		cValues = append(cValues, cValue)
