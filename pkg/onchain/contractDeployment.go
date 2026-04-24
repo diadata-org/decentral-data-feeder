@@ -25,10 +25,12 @@ func DeployOrBindContract(
 		switch contract.(type) {
 		case diaoraclev3.DIAOracleV3:
 			var contractPtr *diaoraclev3.DIAOracleV3
-			err = onchain.DeployOrBindContract(deployedContract, conn, conn, auth, &contractPtr, nil, 18)
+			var contractBackup *diaoraclev3.DIAOracleV3
+			err = onchain.DeployOrBindContract(deployedContract, conn, conn, auth, &contractPtr, &contractBackup, 18)
 			if err != nil {
 				return nil, err
 			}
+
 			contract = *contractPtr
 		case diaOracleRandomness.DIAOracleRandomness:
 			contract, err = diaOracleRandomness.NewDIAOracleRandomness(common.HexToAddress(deployedContract), conn)
@@ -40,7 +42,8 @@ func DeployOrBindContract(
 		switch contract.(type) {
 		case diaoraclev3.DIAOracleV3:
 			var contractPtr *diaoraclev3.DIAOracleV3
-			err = onchain.DeployOrBindContract("", conn, conn, auth, &contractPtr, nil, 18)
+			var contractBackup *diaoraclev3.DIAOracleV3
+			err = onchain.DeployOrBindContract("", conn, conn, auth, &contractPtr, &contractBackup, 18)
 			if err != nil {
 				log.Fatalf("could not deploy contract: %v", err)
 				return nil, err
