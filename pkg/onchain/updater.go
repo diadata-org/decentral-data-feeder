@@ -126,7 +126,7 @@ func OracleUpdateExecutor(
 			// update oracle with collected keys and values.
 			log.Infof("collected %v responses. make oracle update...", len(values))
 			switch contract := contractAny.(type) {
-			case *diaoraclev3.DiaOracleV3MultiupdateService:
+			case *diaoraclev3.DIAOracleV3:
 				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix())
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
@@ -193,7 +193,7 @@ func OracleUpdateExecutorForHighFrequencyScraper(
 			valuesSnapshot := values
 
 			switch contract := contractAny.(type) {
-			case *diaoraclev3.DiaOracleV3MultiupdateService:
+			case *diaoraclev3.DIAOracleV3:
 				go func() {
 					err := updateOracleMultiValues(*contract, auth, keysSnapshot, valuesSnapshot, time.Now().Unix())
 					if err != nil {
@@ -210,7 +210,7 @@ func OracleUpdateExecutorForHighFrequencyScraper(
 }
 
 func updateOracleMultiValues(
-	contract diaoraclev3.DiaOracleV3MultiupdateService,
+	contract diaoraclev3.DIAOracleV3,
 	auth *bind.TransactOpts,
 	keys []string,
 	values []*big.Int,
