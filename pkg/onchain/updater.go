@@ -3,6 +3,7 @@ package onchain
 import (
 	"encoding/json"
 	"math/big"
+	"strconv"
 	"time"
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/scraper"
@@ -14,8 +15,10 @@ import (
 )
 
 var (
-	keys   []string
-	values []*big.Int
+	keys                  []string
+	values                []*big.Int
+	isFirstRun            = true
+	batchSizeOracleUpdate int
 )
 
 func init() {
@@ -25,6 +28,13 @@ func init() {
 		log.Errorf("Parse log level: %v.", err)
 	}
 	log.SetLevel(loglevel)
+
+	batchSizeOracleUpdate, err = strconv.Atoi(utils.Getenv("BATCH_SIZE_ORACLE_UPDATE", "20"))
+	if err != nil {
+		log.Errorf("Parse BATCH_SIZE_ORACLE_UPDATE: %v. Using default value of 20", err)
+		batchSizeOracleUpdate = 20
+	}
+	log.Infof("Batch size for oracle update: %d", batchSizeOracleUpdate)
 }
 
 func OracleUpdateExecutor(
@@ -124,20 +134,24 @@ func OracleUpdateExecutor(
 		case <-updateDoneChannel:
 
 			// update oracle with collected keys and values.
-			log.Infof("collected %v responses. make oracle update...", len(values))
+			log.Infof("OracleUpdateExecutor collected %v responses. make oracle update...", len(values))
+
 			switch contract := contractAny.(type) {
-			case *diaoraclev3.DiaOracleV3MultiupdateService:
-				err := updateOracleMultiValues(*contract, auth, keys, values, time.Now().Unix())
+			case diaoraclev3.DIAOracleV3:
+				err := updateOracleMultiValues(contract, auth, keys, values, time.Now().Unix(), isFirstRun)
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
 					return
 				}
 
+			default:
+				log.Errorf("DEBUG: Unknown contract type: %T", contractAny)
 			}
 
 			// reset keys and values for next update.
 			keys = []string{}
 			values = []*big.Int{}
+			isFirstRun = false // Mark first run as complete
 		}
 	}
 }
@@ -187,39 +201,43 @@ func OracleUpdateExecutorForHighFrequencyScraper(
 				}
 			}
 		case <-updateDoneChannel:
-			log.Infof("collected %v responses. make oracle update...", len(values))
+			log.Infof("OracleUpdateExecutorForHighFrequencyScraper collected %v responses. make oracle update...", len(values))
 
 			keysSnapshot := keys
 			valuesSnapshot := values
+			isFirstRunSnapshot := isFirstRun
 
 			switch contract := contractAny.(type) {
-			case *diaoraclev3.DiaOracleV3MultiupdateService:
+			case diaoraclev3.DIAOracleV3:
 				go func() {
-					err := updateOracleMultiValues(*contract, auth, keysSnapshot, valuesSnapshot, time.Now().Unix())
+					err := updateOracleMultiValues(contract, auth, keysSnapshot, valuesSnapshot, time.Now().Unix(), isFirstRunSnapshot)
 					if err != nil {
 						log.Warnf("updater - Failed to update Oracle: %v.", err)
 					}
 				}()
+			default:
+				log.Errorf("OracleUpdateExecutorForHighFrequencyScraper - Unknown contract type: %T", contractAny)
 			}
 
 			// reset keys and values for next update.
 			keys = []string{}
 			values = []*big.Int{}
+			isFirstRun = false // Mark first run as complete
 		}
 	}
 }
 
 func updateOracleMultiValues(
-	contract diaoraclev3.DiaOracleV3MultiupdateService,
+	contract diaoraclev3.DIAOracleV3,
 	auth *bind.TransactOpts,
 	keys []string,
 	values []*big.Int,
 	timestamp int64,
+	isFirstRun bool,
 ) error {
 
 	var cValues []*big.Int
 	var gasPrice *big.Int
-	var err error
 
 	for _, value := range values {
 		// Create compressed argument with values/timestamps
@@ -229,19 +247,55 @@ func updateOracleMultiValues(
 		cValues = append(cValues, cValue)
 	}
 
-	// Write values to smart contract
-	tx, err := contract.SetMultipleValues(&bind.TransactOpts{
-		From:     auth.From,
-		Signer:   auth.Signer,
-		GasPrice: gasPrice,
-	}, keys, cValues)
-	// check if tx is sendable then fgo backup
-	if err != nil {
-		// backup in here
-		return err
+	totalItems := len(keys)
+
+	if isFirstRun {
+		if totalItems > batchSizeOracleUpdate {
+			log.Infof("updater - First run: Total items: %d, processing in batches of %d", totalItems, batchSizeOracleUpdate)
+		}
+
+		for i := 0; i < totalItems; i += batchSizeOracleUpdate {
+			end := i + batchSizeOracleUpdate
+			if end > totalItems {
+				end = totalItems
+			}
+
+			batchKeys := keys[i:end]
+			batchValues := cValues[i:end]
+
+			log.Infof("updater - Processing batch %d: items %d to %d", (i/batchSizeOracleUpdate)+1, i+1, end)
+
+			// Write values to smart contract
+			tx, err := contract.SetMultipleValues(&bind.TransactOpts{
+				From:     auth.From,
+				Signer:   auth.Signer,
+				GasPrice: gasPrice,
+			}, batchKeys, batchValues)
+			if err != nil {
+				log.Errorf("updater - Failed to update batch %d: %v", (i/batchSizeOracleUpdate)+1, err)
+				return err
+			}
+
+			logTx(tx)
+			log.Infof("updater - Successfully processed batch %d", (i/batchSizeOracleUpdate)+1)
+		}
+	} else {
+		log.Infof("updater - Subsequent run: processing all %d items in single transaction", totalItems)
+
+		tx, err := contract.SetMultipleValues(&bind.TransactOpts{
+			From:     auth.From,
+			Signer:   auth.Signer,
+			GasPrice: gasPrice,
+		}, keys, cValues)
+		if err != nil {
+			log.Errorf("updater - Failed to update oracle: %v", err)
+			return err
+		}
+
+		logTx(tx)
+		log.Infof("updater - Successfully processed all items in single transaction")
 	}
 
-	logTx(tx)
 	return nil
 }
 

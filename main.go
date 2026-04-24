@@ -45,7 +45,7 @@ func main() {
 	case scraper.TWELVEDATA:
 		DS = scraper.NewDataScraper(scraper.TWELVEDATA)
 
-		var contract diaoraclev3.DiaOracleV3MultiupdateService
+		var contract diaoraclev3.DIAOracleV3
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
@@ -55,7 +55,7 @@ func main() {
 	case scraper.PARTICULA:
 		DS = scraper.NewDataScraper(scraper.PARTICULA)
 
-		var contract diaoraclev3.DiaOracleV3MultiupdateService
+		var contract diaoraclev3.DIAOracleV3
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
@@ -65,7 +65,7 @@ func main() {
 	case scraper.RWAWS:
 		DS = scraper.NewDataScraper(scraper.RWAWS)
 
-		var contract diaoraclev3.DiaOracleV3MultiupdateService
+		var contract diaoraclev3.DIAOracleV3
 		c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 		if err != nil {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
