@@ -123,6 +123,14 @@ type RWAWSScraper struct {
 	forcePublishAfter   time.Duration
 
 	decimals int64
+
+	publishCh chan publishJob
+}
+
+type publishJob struct {
+	keys      []string
+	values    []*big.Float
+	timestamp int64
 }
 
 func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string, decimals int64) *RWAWSScraper {
@@ -173,7 +181,13 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		log.Fatal("Could not load configuration file: ", err)
 	}
 
+	s.heartbeatTicker = time.NewTicker(10 * time.Second)
+
+	s.publishCh = make(chan publishJob, 100)
+
 	go s.mainLoop()
+	go s.heartbeatLoop()
+	go s.publishLoop()
 	return s
 }
 
@@ -207,12 +221,26 @@ func (scraper *RWAWSScraper) Close() error {
 	return err
 }
 
+func (scraper *RWAWSScraper) heartbeatLoop() {
+	for {
+		select {
+		case <-scraper.ctx.Done():
+			return
+		case <-scraper.closed:
+			return
+		case <-scraper.heartbeatTicker.C:
+			if err := scraper.sendHeartbeat(); err != nil {
+				log.Debugf("RWAWS sendHeartbeat: %v", err)
+			}
+		}
+	}
+}
+
 func (scraper *RWAWSScraper) mainLoop() {
 	if err := scraper.connectAndSubscribe(); err != nil {
 		log.Fatal("RWAWS connectAndSubscribe: ", err)
 	}
 
-	scraper.heartbeatTicker = time.NewTicker(10 * time.Second)
 	scraper.configTicker = time.NewTicker(time.Duration(configUpdateSeconds) * time.Second)
 
 	for {
@@ -221,12 +249,6 @@ func (scraper *RWAWSScraper) mainLoop() {
 			return
 		case <-scraper.closed:
 			return
-
-		case <-scraper.heartbeatTicker.C:
-			if err := scraper.sendHeartbeat(); err != nil {
-				log.Errorf("RWAWS sendHeartbeat: %v", err)
-			}
-
 		case <-scraper.configTicker.C:
 			if err := scraper.updateConfig(RAW_WS_CONFIG); err != nil {
 				log.Errorf("RWAWS updateConfig: %v", err)
@@ -242,11 +264,53 @@ func (scraper *RWAWSScraper) mainLoop() {
 					return
 				default:
 				}
-				time.Sleep(2 * time.Second)
-				if err := scraper.reconnect(); err != nil {
-					log.Errorf("RWAWS reconnect: %v", err)
+				scraper.handleDisconnect()
+			}
+		}
+	}
+}
+
+func (scraper *RWAWSScraper) publishLoop() {
+	for {
+		select {
+		case <-scraper.ctx.Done():
+			return
+		case <-scraper.closed:
+			return
+		case job := <-scraper.publishCh:
+			switch contract := scraper.contractAny.(type) {
+			case *diaoraclev3.DiaOracleV3MultiupdateService:
+				err := updateOracleMultiValuesForRWAWS(
+					*contract, scraper.auth,
+					job.keys, job.values,
+					job.timestamp, scraper.decimals,
+				)
+				if err != nil {
+					log.Warnf("updater - Failed to update Oracle: %v.", err)
 				}
 			}
+		}
+	}
+}
+
+func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
+	log.Infof("collected %v responses. make oracle update...", len(values))
+
+	switch scraper.contractAny.(type) {
+	case *diaoraclev3.DiaOracleV3MultiupdateService:
+		keysCopy := make([]string, len(keys))
+		copy(keysCopy, keys)
+		valuesCopy := make([]*big.Float, len(values))
+		copy(valuesCopy, values)
+
+		select {
+		case scraper.publishCh <- publishJob{
+			keys:      keysCopy,
+			values:    valuesCopy,
+			timestamp: nextTimestamp(),
+		}:
+		default:
+			log.Warnf("updater - publish channel full, dropping update")
 		}
 	}
 }
@@ -262,18 +326,19 @@ func (scraper *RWAWSScraper) connectAndSubscribe() error {
 
 	conn, _, err := ws.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to dial WebSocket: %v", err)
 	}
 
 	scraper.connMu.Lock()
 	scraper.conn = conn
 	scraper.connMu.Unlock()
 
-	log.Infof("RWAWS - WebSocket connected")
+	log.Infof("RWAWS - WebSocket connected to %s", u.String())
 	return scraper.subscribeAll()
 }
 
 func (scraper *RWAWSScraper) reconnect() error {
+	log.Infof("RWAWS - closing existing connection before reconnecting")
 	scraper.connMu.Lock()
 	if scraper.conn != nil {
 		_ = scraper.conn.Close()
@@ -282,6 +347,37 @@ func (scraper *RWAWSScraper) reconnect() error {
 	scraper.connMu.Unlock()
 
 	return scraper.connectAndSubscribe()
+}
+
+func (scraper *RWAWSScraper) handleDisconnect() {
+	const maxRetries = 3
+	backoff := 2 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-scraper.ctx.Done():
+			return
+		case <-scraper.closed:
+			return
+		default:
+		}
+
+		log.Warnf("RWAWS - reconnecting... (attempt %d of %d) after %v", i+1, maxRetries, backoff)
+		time.Sleep(backoff)
+
+		if err := scraper.reconnect(); err != nil {
+			log.Errorf("RWAWS - reconnect attempt %d failed: %v", i+1, err)
+			if backoff < 60*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+
+		log.Infof("RWAWS - reconnect successful on attempt %d", i+1)
+		return
+	}
+
+	log.Fatalf("RWAWS - failed to reconnect after %d attempts, giving up", maxRetries)
 }
 
 func (scraper *RWAWSScraper) subscribeAll() error {
@@ -298,9 +394,13 @@ func (scraper *RWAWSScraper) subscribeAll() error {
 	}
 
 	b, _ := json.Marshal(msg)
-	log.Infof("RWAWS - subscribing payload: %s", string(b))
+	log.Infof("RWAWS - subscribing to %d symbols: %s", len(symbols), string(b))
 
-	return scraper.writeJSON(msg)
+	if err := scraper.writeJSON(msg); err != nil {
+		return fmt.Errorf("failed to subscribe to symbols: %v", err)
+	}
+
+	return nil
 }
 
 func (scraper *RWAWSScraper) sendHeartbeat() error {
@@ -347,6 +447,21 @@ func (scraper *RWAWSScraper) readMessage() error {
 	case "subscribe-status":
 		log.Infof("RWAWS - subscribe-status: status=%s code=%d msg=%s success=%v fails=%v",
 			msg.Status, msg.Code, msg.Message, msg.Success, msg.Fails)
+
+		if msg.Fails != nil {
+			switch v := msg.Fails.(type) {
+			case []interface{}:
+				if len(v) > 0 {
+					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
+					scraper.handleDisconnect()
+				}
+			case map[string]interface{}:
+				if len(v) > 0 {
+					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
+					scraper.handleDisconnect()
+				}
+			}
+		}
 		return nil
 	case "price":
 		return scraper.handlePriceMessage(msg)
@@ -554,27 +669,6 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketSt
 	return keys, values
 }
 
-func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
-	log.Infof("collected %v responses. make oracle update...", len(values))
-
-	switch contract := scraper.contractAny.(type) {
-	case *diaoraclev3.DiaOracleV3MultiupdateService:
-		keysCopy := make([]string, len(keys))
-		copy(keysCopy, keys)
-		valuesCopy := make([]*big.Float, len(values))
-		copy(valuesCopy, values)
-
-		ts := nextTimestamp()
-
-		go func() {
-			err := updateOracleMultiValuesForRWAWS(*contract, scraper.auth, keysCopy, valuesCopy, ts, scraper.decimals)
-			if err != nil {
-				log.Warnf("updater - Failed to update Oracle: %v.", err)
-			}
-		}()
-	}
-}
-
 func (scraper *RWAWSScraper) updateConfig(filename string) error {
 	c, err := models.GetRWAConfig(filename)
 	if err != nil {
@@ -750,7 +844,6 @@ func updateOracleMultiValuesForRWAWS(
 	}
 
 	log.Infof("updater - Gas price: %d.", tx.GasPrice())
-	// log.Printf("Data: %x\n", tx.Data())
 	log.Infof("updater - Nonce: %d.", tx.Nonce())
 	log.Infof("updater - Tx To: %s.", tx.To().String())
 	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
