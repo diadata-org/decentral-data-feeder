@@ -34,6 +34,9 @@ func DeployOrBindContract(
 			contract = *contractPtr
 		case diaOracleRandomness.DIAOracleRandomness:
 			contract, err = diaOracleRandomness.NewDIAOracleRandomness(common.HexToAddress(deployedContract), conn)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 	} else {
