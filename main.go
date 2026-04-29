@@ -75,7 +75,7 @@ func main() {
 			log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
 		}
 
-		s := scraper.NewRWAWSScraper(auth, c, chainId, source, decimals)
+		s := scraper.NewRWAWSScraper(auth, c.(diaoraclev3.DIAOracleV3), chainId, source, decimals)
 		defer s.Close()
 
 		quit := make(chan os.Signal, 1)
