@@ -279,15 +279,17 @@ func (scraper *RWAWSScraper) publishLoop() {
 			return
 		case job := <-scraper.publishCh:
 			switch contract := scraper.contractAny.(type) {
-			case *diaoraclev3.DIAOracleV3:
+			case diaoraclev3.DIAOracleV3:
 				err := updateOracleMultiValuesForRWAWS(
-					*contract, scraper.auth,
+					contract, scraper.auth,
 					job.keys, job.values,
 					job.timestamp, scraper.decimals,
 				)
 				if err != nil {
 					log.Warnf("updater - Failed to update Oracle: %v.", err)
 				}
+			default:
+				log.Errorf("RWAWS - unexpected contract type: %T", contract)
 			}
 		}
 	}
@@ -297,7 +299,7 @@ func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
 	log.Infof("collected %v responses. make oracle update...", len(values))
 
 	switch scraper.contractAny.(type) {
-	case *diaoraclev3.DIAOracleV3:
+	case diaoraclev3.DIAOracleV3:
 		keysCopy := make([]string, len(keys))
 		copy(keysCopy, keys)
 		valuesCopy := make([]*big.Float, len(values))
