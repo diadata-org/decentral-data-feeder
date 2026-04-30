@@ -25,8 +25,9 @@ const (
 )
 
 var (
-	lastTimestampMu sync.Mutex
-	lastTimestamp   int64
+	lastTimestampMu          sync.Mutex
+	lastTimestamp            int64
+	rwawsConfigUpdateSeconds int
 )
 
 type RWAWSQuote struct {
@@ -92,10 +93,11 @@ type RWAWSScraper struct {
 	closeOnce sync.Once
 	closed    chan struct{}
 
-	stockSymbols []string
-	fxTickers    []string
-	commodities  []string
-	etfs         []string
+	hkStocks    []string
+	usStocks    []string
+	fxTickers   []string
+	commodities []string
+	usEtfs      []string
 
 	pendingMu     sync.Mutex
 	pendingQuotes map[string]RWAWSQuote
@@ -150,6 +152,12 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "30"))
 	if err != nil {
 		forcePublishAfterSec = 30
+	}
+
+	rwawsConfigUpdateSeconds, err = strconv.Atoi(utils.Getenv("RWA_WS_CONFIG_UPDATE_SECONDS", "86400"))
+	if err != nil {
+		log.Errorf("parse RWA_WS_CONFIG_UPDATE_SECONDS: %v", err)
+		rwawsConfigUpdateSeconds = 86400
 	}
 
 	s := &RWAWSScraper{
@@ -240,13 +248,7 @@ func (scraper *RWAWSScraper) mainLoop() {
 		log.Fatal("RWAWS connectAndSubscribe: ", err)
 	}
 
-	configUpdateSeconds, err := strconv.Atoi(utils.Getenv("RWAWS_CONFIG_UPDATE_SECONDS", "86400"))
-	if err != nil {
-		log.Errorf("parse RWAWS_CONFIG_UPDATE_SECONDS: %v", err)
-		configUpdateSeconds = 86400
-	}
-
-	scraper.configTicker = time.NewTicker(time.Duration(configUpdateSeconds) * time.Second)
+	scraper.configTicker = time.NewTicker(time.Duration(rwawsConfigUpdateSeconds) * time.Second)
 
 	for {
 		select {
@@ -504,35 +506,25 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 	}
 
 	switch {
-	case contains(scraper.stockSymbols, msg.Symbol):
+	case contains(scraper.hkStocks, msg.Symbol):
 		quote.Type = Equities
 
-		marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
-		if knownMarket {
-			quote.MarketHoliday = marketHoliday
-			quote.MarketOpen = marketOpen
-			if !marketOpen {
-				return nil
-			}
-		} else {
-			// Unknown market: do not block publishing in v1.
-			quote.MarketHoliday = false
-			quote.MarketOpen = true
+		if scraper.applyMarketStatus(msg, &quote) {
+			return nil
 		}
 
-	case contains(scraper.etfs, msg.Symbol):
+	case contains(scraper.usStocks, msg.Symbol):
+		quote.Type = Equities
+
+		if scraper.applyMarketStatus(msg, &quote) {
+			return nil
+		}
+
+	case contains(scraper.usEtfs, msg.Symbol):
 		quote.Type = ETF
 
-		marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
-		if knownMarket {
-			quote.MarketHoliday = marketHoliday
-			quote.MarketOpen = marketOpen
-			if !marketOpen {
-				return nil
-			}
-		} else {
-			quote.MarketHoliday = false
-			quote.MarketOpen = true
+		if scraper.applyMarketStatus(msg, &quote) {
+			return nil
 		}
 
 	case contains(scraper.fxTickers, msg.Symbol):
@@ -552,6 +544,21 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 
 	scraper.maybePublishNowOrSchedule()
 	return nil
+}
+
+func (scraper *RWAWSScraper) applyMarketStatus(msg rwaWSMessage, quote *RWAWSQuote) (drop bool) {
+	marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
+	if knownMarket {
+		quote.MarketHoliday = marketHoliday
+		quote.MarketOpen = marketOpen
+		if !marketOpen {
+			return true
+		}
+	} else {
+		quote.MarketHoliday = false
+		quote.MarketOpen = true
+	}
+	return false
 }
 
 // Publish immediately if cooldown already passed.
@@ -676,7 +683,6 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketSt
 	return keys, values
 }
 
-<<<<<<< HEAD
 func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
 	log.Infof("collected %v responses. make oracle update...", len(values))
 
@@ -704,19 +710,51 @@ func (scraper *RWAWSScraper) updateConfig(filename string, branch string) error 
 		return err
 	}
 
-	scraper.stockSymbols = c.Stocks
+	oldSymbols := scraper.allSymbols()
+
+	scraper.usStocks = c.US_Stocks
+	scraper.hkStocks = c.HK_Stocks
 	scraper.fxTickers = c.FX
 	scraper.commodities = c.Commodities
-	scraper.etfs = c.ETF
+	scraper.usEtfs = c.US_ETF
 
-	log.Infof("RWAWS - loaded config: stocks=%d fx=%d commodities=%d etf=%d",
-		getNumSymbols(scraper.stockSymbols),
+	log.Infof("RWAWS - loaded config: hkstocks=%d usstocks=%d fx=%d commodities=%d usetfs=%d",
+		getNumSymbols(scraper.hkStocks),
+		getNumSymbols(scraper.usStocks),
 		getNumSymbols(scraper.fxTickers),
 		getNumSymbols(scraper.commodities),
-		getNumSymbols(scraper.etfs),
+		getNumSymbols(scraper.usEtfs),
 	)
 
+	if len(oldSymbols) == 0 {
+		return nil
+	}
+
+	newSymbols := scraper.allSymbols()
+	if !symbolsEqual(oldSymbols, newSymbols) {
+		log.Infof("RWAWS - symbols changed, subscribing to new symbols")
+		if err := scraper.subscribeAll(); err != nil {
+			log.Errorf("RWAWS - failed to subscribe to new symbols: %v", err)
+		}
+	}
+
 	return nil
+}
+
+func symbolsEqual(oldSymbols []string, newSymbols []string) bool {
+	if len(oldSymbols) != len(newSymbols) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(oldSymbols))
+	for _, v := range oldSymbols {
+		seen[v] = struct{}{}
+	}
+	for _, v := range newSymbols {
+		if _, ok := seen[v]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (scraper *RWAWSScraper) allSymbols() []string {
@@ -737,10 +775,11 @@ func (scraper *RWAWSScraper) allSymbols() []string {
 		}
 	}
 
-	appendUnique(scraper.stockSymbols)
+	appendUnique(scraper.hkStocks)
+	appendUnique(scraper.usStocks)
 	appendUnique(scraper.fxTickers)
 	appendUnique(scraper.commodities)
-	appendUnique(scraper.etfs)
+	appendUnique(scraper.usEtfs)
 
 	return out
 }
@@ -755,6 +794,13 @@ func (scraper *RWAWSScraper) getStockMarketStatus(msg rwaWSMessage) (bool, bool,
 	if mic == "XHKG" || exchange == "HKEX" {
 		holiday := scraper.isHKHoliday(now)
 		open := scraper.isHKMarketOpen(now)
+		return holiday, open, true
+	}
+
+	// NYSE / NASDAQ
+	if mic == "XNYS" || mic == "XNAS" || mic == "BATS" || exchange == "NYSE" || exchange == "NASDAQ" || exchange == "CBOE" {
+		holiday := scraper.isNYSEHoliday(now)
+		open := scraper.isNYSEMarketOpen(now)
 		return holiday, open, true
 	}
 
@@ -779,6 +825,27 @@ func (scraper *RWAWSScraper) isHKMarketOpen(now time.Time) bool {
 	inAfternoon := minutes >= 13*60 && minutes < 16*60
 
 	return inMorning || inAfternoon
+}
+
+func (scraper *RWAWSScraper) isNYSEHoliday(now time.Time) bool {
+	nyse := calendar.XNYS()
+	return nyse.IsHoliday(now)
+}
+
+func (scraper *RWAWSScraper) isNYSEMarketOpen(now time.Time) bool {
+	if scraper.isNYSEHoliday(now) {
+		return false
+	}
+
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		log.Errorf("load America/New_York location: %v", err)
+		return false
+	}
+	now = now.In(loc)
+
+	minutes := now.Hour()*60 + now.Minute()
+	return minutes >= 9*60+30 && minutes < 16*60
 }
 
 func parseRawFloat(raw json.RawMessage) (float64, error) {
