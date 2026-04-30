@@ -662,14 +662,14 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketSt
 	log.Info("got rwa ws data: ", rwaResponse)
 
 	if (rwaResponse.Type == Equities || rwaResponse.Type == ETF) && !*marketStatusAdded {
-		keys = append(keys, "Market_Open")
+		keys = append(keys, fmt.Sprintf("%s_Market_Open", rwaResponse.Symbol))
 		marketOpen := new(big.Float).SetFloat64(0)
 		if rwaResponse.MarketOpen {
 			marketOpen = new(big.Float).SetFloat64(1)
 		}
 		values = append(values, marketOpen)
 
-		keys = append(keys, "Market_Holiday")
+		keys = append(keys, fmt.Sprintf("%s_Market_Holiday", rwaResponse.Symbol))
 		marketHoliday := new(big.Float).SetFloat64(0)
 		if rwaResponse.MarketHoliday {
 			marketHoliday = new(big.Float).SetFloat64(1)
