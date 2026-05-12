@@ -14,11 +14,12 @@ type RWAConfig struct {
 }
 
 type RWAWSConfig struct {
-	HK_Stocks   []string `json:"HK_Stocks"`
-	US_Stocks   []string `json:"US_Stocks"`
-	FX          []string `json:"FX"`
-	Commodities []string `json:"Commodities"`
-	US_ETF      []string `json:"US_ETF"`
+	HK_Stocks           []string           `json:"HK_Stocks"`
+	US_Stocks           []string           `json:"US_Stocks"`
+	FX                  []string           `json:"FX"`
+	Commodities         []string           `json:"Commodities"`
+	US_ETF              []string           `json:"US_ETF"`
+	DeviationThresholds map[string]float64 `json:"DeviationThresholds"`
 }
 
 func GetRWAConfig(filename string) (c RWAConfig, err error) {
