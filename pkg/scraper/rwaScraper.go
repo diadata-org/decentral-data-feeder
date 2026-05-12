@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"net/url"
 	"strconv"
@@ -126,6 +127,8 @@ type RWAWSScraper struct {
 	decimals int64
 
 	publishCh chan publishJob
+
+	deviationThresholds map[string]float64
 }
 
 type publishJob struct {
@@ -629,7 +632,7 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 		last, exists := scraper.lastPublishedPrices[quote.Symbol]
 		lastTime := scraper.lastPublishedTimes[quote.Symbol]
 
-		priceChanged := !exists || last != quote.Price
+		priceChanged := !exists || scraper.hasPriceDeviatedEnough(quote.Symbol, last, quote.Price)
 		timedOut := exists && now.Sub(lastTime) >= scraper.forcePublishAfter
 
 		if priceChanged || timedOut {
@@ -655,6 +658,19 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 	}
 
 	scraper.publishData(keys, values)
+}
+
+func (scraper *RWAWSScraper) hasPriceDeviatedEnough(symbol string, oldPrice, newPrice float64) bool {
+	threshold, hasThreshold := scraper.deviationThresholds[symbol]
+	if !hasThreshold {
+		// any price change triggers update
+		return oldPrice != newPrice
+	}
+	if oldPrice == 0 {
+		return true
+	}
+	deviation := math.Abs(newPrice-oldPrice) / oldPrice
+	return deviation >= threshold
 }
 
 func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketStatusAdded *bool) (keys []string, values []*big.Float) {
@@ -696,6 +712,7 @@ func (scraper *RWAWSScraper) updateConfig(filename string) error {
 	scraper.fxTickers = c.FX
 	scraper.commodities = c.Commodities
 	scraper.usEtfs = c.US_ETF
+	scraper.deviationThresholds = c.DeviationThresholds
 
 	log.Infof("RWAWS - loaded config: hkstocks=%d usstocks=%d fx=%d commodities=%d usetfs=%d",
 		getNumSymbols(scraper.hkStocks),
