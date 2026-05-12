@@ -890,31 +890,59 @@ func updateOracleMultiValuesForRWAWS(
 	decimals int64) error {
 
 	var cValues []*big.Int
+	var filteredKeys []string
 	var gasPrice *big.Int
 
 	multiplier := new(big.Float).SetInt(
 		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
 	)
 
-	for _, value := range values {
-		scaled := new(big.Float).Mul(value, multiplier)
+	for i, key := range keys {
+		// Read on-chain timestamp for this key
+		var onchainTimestamp int64
+		_, onchainTs, err := contract.GetValue(nil, key)
+		if err != nil {
+			log.Warnf("updater - could not read on-chain value for %s: %v, proceeding with original timestamp", key, err)
+			onchainTimestamp = 0
+		} else {
+			onchainTimestamp = onchainTs.Int64()
+		}
+
+		// Determine the timestamp to use for submission
+		var submitTimestamp int64
+		if timestamp > onchainTimestamp {
+			// New data is strictly newer — submit as-is
+			submitTimestamp = timestamp
+		} else if time.Since(time.Unix(timestamp, 0)) <= time.Minute {
+			// Source timestamp hasn't increased but data is fresh (within 1 min) — use time.Now()
+			log.Infof("updater - %s: source timestamp not increasing (new=%d, onchain=%d) but data is fresh, using time.Now()", key, timestamp, onchainTimestamp)
+			submitTimestamp = nextTimestamp()
+		} else {
+			// Truly stale — skip
+			log.Infof("updater - %s: skipping stale update (source timestamp=%d, onchain=%d)", key, timestamp, onchainTimestamp)
+			continue
+		}
+
+		scaled := new(big.Float).Mul(values[i], multiplier)
 		scaledInt, _ := scaled.Int(nil)
 
-		// Create compressed argument with values/timestamps
 		cValue := new(big.Int).Lsh(scaledInt, 128)
-		cValue = cValue.Add(cValue, big.NewInt(timestamp))
+		cValue = cValue.Add(cValue, big.NewInt(submitTimestamp))
 		cValues = append(cValues, cValue)
+		filteredKeys = append(filteredKeys, key)
 	}
 
-	// Write values to smart contract
+	if len(filteredKeys) == 0 {
+		log.Infof("updater - all keys skipped, no oracle update needed")
+		return nil
+	}
+
 	tx, err := contract.SetMultipleValues(&bind.TransactOpts{
 		From:     auth.From,
 		Signer:   auth.Signer,
 		GasPrice: gasPrice,
-	}, keys, cValues)
-	// check if tx is sendable then fgo backup
+	}, filteredKeys, cValues)
 	if err != nil {
-		// backup in here
 		return err
 	}
 
