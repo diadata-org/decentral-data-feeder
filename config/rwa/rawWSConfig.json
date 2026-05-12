@@ -1,7 +1,16 @@
 {
   "HK_Stocks": ["1211", "0700"],
-  "US_Stocks": ["AMZN", "NVDA", "COIN", "MSTR", "TSLA"],
+  "US_Stocks": ["AMZN", "NVDA", "COIN", "MSTR", "TSLA", "CRCL", "BMNR"],
   "FX": ["EUR/USD", "GBP/USD", "JPY/USD"],
   "Commodities": ["C_1", "CL1"],
-  "US_ETF": ["IBHG"]
+  "US_ETF": ["IBHG", "IAU", "SPYM", "SIVR", "PPLT"],
+  "DeviationThresholds": {
+      "IAU": 0.001,
+      "SIVR": 0.001,
+      "PPLT": 0.001,
+      "CRCL": 0.001,
+      "BMNR": 0.001,
+      "IBHG": 0.001,
+      "SPYM": 0.0001
+  }
 }
