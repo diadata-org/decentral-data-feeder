@@ -129,6 +129,9 @@ type RWAWSScraper struct {
 	publishCh chan publishJob
 
 	deviationThresholds map[string]float64
+
+	lastSubmittedTimestamps   map[string]int64
+	lastSubmittedTimestampsMu sync.Mutex
 }
 
 type publishJob struct {
@@ -164,23 +167,24 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 	}
 
 	s := &RWAWSScraper{
-		ctx:                 ctx,
-		cancel:              cancel,
-		apiKey:              utils.Getenv("TWELVEDATA_API_KEY", ""),
-		wsURL:               utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
-		closed:              make(chan struct{}),
-		pendingQuotes:       make(map[string]RWAWSQuote),
-		publishCooldown:     time.Duration(publishIntervalMs) * time.Millisecond,
-		hkLoc:               hkLoc,
-		hkex:                calendar.XHKG(),
-		auth:                auth,
-		contractAny:         contractAny,
-		chainId:             chainId,
-		source:              source,
-		lastPublishedPrices: make(map[string]float64),
-		lastPublishedTimes:  make(map[string]time.Time),
-		forcePublishAfter:   time.Duration(forcePublishAfterSec) * time.Second,
-		decimals:            decimals,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		apiKey:                  utils.Getenv("TWELVEDATA_API_KEY", ""),
+		wsURL:                   utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
+		closed:                  make(chan struct{}),
+		pendingQuotes:           make(map[string]RWAWSQuote),
+		publishCooldown:         time.Duration(publishIntervalMs) * time.Millisecond,
+		hkLoc:                   hkLoc,
+		hkex:                    calendar.XHKG(),
+		auth:                    auth,
+		contractAny:             contractAny,
+		chainId:                 chainId,
+		source:                  source,
+		lastPublishedPrices:     make(map[string]float64),
+		lastPublishedTimes:      make(map[string]time.Time),
+		forcePublishAfter:       time.Duration(forcePublishAfterSec) * time.Second,
+		decimals:                decimals,
+		lastSubmittedTimestamps: make(map[string]int64),
 	}
 
 	if s.apiKey == "" {
@@ -290,7 +294,7 @@ func (scraper *RWAWSScraper) publishLoop() {
 		case job := <-scraper.publishCh:
 			switch contract := scraper.contractAny.(type) {
 			case diaoraclev3.DIAOracleV3:
-				err := updateOracleMultiValuesForRWAWS(
+				err := scraper.updateOracleMultiValuesForRWAWS(
 					contract, scraper.auth,
 					job.keys, job.values,
 					job.timestamp, scraper.decimals,
@@ -919,7 +923,7 @@ func nextTimestamp() int64 {
 	return lastTimestamp
 }
 
-func updateOracleMultiValuesForRWAWS(
+func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 	contract diaoraclev3.DIAOracleV3,
 	auth *bind.TransactOpts,
 	keys []string,
@@ -935,29 +939,21 @@ func updateOracleMultiValuesForRWAWS(
 		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
 	)
 
-	for i, key := range keys {
-		// Read on-chain timestamp for this key
-		var onchainTimestamp int64
-		_, onchainTs, err := contract.GetValue(nil, key)
-		if err != nil {
-			log.Warnf("updater - could not read on-chain value for %s: %v, proceeding with original timestamp", key, err)
-			onchainTimestamp = 0
-		} else {
-			onchainTimestamp = onchainTs.Int64()
-		}
+	scraper.lastSubmittedTimestampsMu.Lock()
+	defer scraper.lastSubmittedTimestampsMu.Unlock()
 
-		// Determine the timestamp to use for submission
+	for i, key := range keys {
+		cachedTimestamp := scraper.lastSubmittedTimestamps[key]
+
 		var submitTimestamp int64
-		if timestamp > onchainTimestamp {
-			// New data is strictly newer — submit as-is
+		if timestamp > cachedTimestamp {
 			submitTimestamp = timestamp
 		} else if time.Since(time.Unix(timestamp, 0)) <= time.Minute {
-			// Source timestamp hasn't increased but data is fresh (within 1 min) — use time.Now()
-			log.Infof("updater - %s: source timestamp not increasing (new=%d, onchain=%d) but data is fresh, using time.Now()", key, timestamp, onchainTimestamp)
+			log.Infof("updater - %s: source timestamp not increasing (new=%d, onchain=%d) but data is fresh, using time.Now()", key, timestamp, cachedTimestamp)
 			submitTimestamp = nextTimestamp()
 		} else {
 			// Truly stale — skip
-			log.Infof("updater - %s: skipping stale update (source timestamp=%d, onchain=%d)", key, timestamp, onchainTimestamp)
+			log.Infof("updater - %s: skipping stale update (source timestamp=%d, onchain=%d)", key, timestamp, cachedTimestamp)
 			continue
 		}
 
@@ -982,6 +978,11 @@ func updateOracleMultiValuesForRWAWS(
 	}, filteredKeys, cValues)
 	if err != nil {
 		return err
+	}
+
+	for i, key := range filteredKeys {
+		submitTs := new(big.Int).And(cValues[i], new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1)))
+		scraper.lastSubmittedTimestamps[key] = submitTs.Int64()
 	}
 
 	log.Infof("updater - Gas price: %d.", tx.GasPrice())
