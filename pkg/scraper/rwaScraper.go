@@ -323,7 +323,7 @@ func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
 		case scraper.publishCh <- publishJob{
 			keys:      keysCopy,
 			values:    valuesCopy,
-			timestamp: nextTimestamp(),
+			timestamp: time.Now().Unix(),
 		}:
 		default:
 			log.Warnf("updater - publish channel full, dropping update")
@@ -939,23 +939,13 @@ func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
 	)
 
-	scraper.lastSubmittedTimestampsMu.Lock()
-	defer scraper.lastSubmittedTimestampsMu.Unlock()
-
 	for i, key := range keys {
-		cachedTimestamp := scraper.lastSubmittedTimestamps[key]
-
-		var submitTimestamp int64
-		if timestamp > cachedTimestamp {
-			submitTimestamp = timestamp
-		} else if time.Since(time.Unix(timestamp, 0)) <= time.Minute {
-			log.Infof("updater - %s: source timestamp not increasing (new=%d, onchain=%d) but data is fresh, using time.Now()", key, timestamp, cachedTimestamp)
-			submitTimestamp = nextTimestamp()
-		} else {
-			// Truly stale — skip
+		if time.Since(time.Unix(timestamp, 0)) > time.Minute {
 			log.Infof("updater - %s: skipping stale update (source timestamp=%d, onchain=%d)", key, timestamp, cachedTimestamp)
 			continue
 		}
+
+		submitTimestamp := nextTimestamp()
 
 		scaled := new(big.Float).Mul(values[i], multiplier)
 		scaledInt, _ := scaled.Int(nil)
@@ -978,11 +968,6 @@ func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 	}, filteredKeys, cValues)
 	if err != nil {
 		return err
-	}
-
-	for i, key := range filteredKeys {
-		submitTs := new(big.Int).And(cValues[i], new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1)))
-		scraper.lastSubmittedTimestamps[key] = submitTs.Int64()
 	}
 
 	log.Infof("updater - Gas price: %d.", tx.GasPrice())
