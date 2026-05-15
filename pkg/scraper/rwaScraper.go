@@ -126,16 +126,7 @@ type RWAWSScraper struct {
 	forcePublishAfter   time.Duration
 
 	decimals int64
-
-	publishCh chan publishJob
-
 	deviationThresholds map[string]float64
-}
-
-type publishJob struct {
-	keys      []string
-	values    []*big.Float
-	timestamp int64
 }
 
 func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string, decimals int64) *RWAWSScraper {
@@ -194,11 +185,12 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 
 	s.heartbeatTicker = time.NewTicker(10 * time.Second)
 
-	s.publishCh = make(chan publishJob, 100)
+	lastTimestampMu.Lock()
+	lastTimestamp = time.Now().Unix()
+	lastTimestampMu.Unlock()
 
 	go s.mainLoop()
 	go s.heartbeatLoop()
-	go s.publishLoop()
 	return s
 }
 
@@ -281,50 +273,21 @@ func (scraper *RWAWSScraper) mainLoop() {
 	}
 }
 
-func (scraper *RWAWSScraper) publishLoop() {
-	for {
-		select {
-		case <-scraper.ctx.Done():
-			return
-		case <-scraper.closed:
-			return
-		case job := <-scraper.publishCh:
-			switch contract := scraper.contractAny.(type) {
-			case diaoraclev3.DIAOracleV3:
-				err := scraper.updateOracleMultiValuesForRWAWS(
-					contract, scraper.auth,
-					job.keys, job.values,
-					job.timestamp, scraper.decimals,
-				)
-				if err != nil {
-					log.Warnf("updater - Failed to update Oracle: %v.", err)
-				}
-			default:
-				log.Errorf("RWAWS - unexpected contract type: %T", contract)
-			}
-		}
-	}
-}
-
 func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
 	log.Infof("collected %v responses. make oracle update...", len(values))
 
-	switch scraper.contractAny.(type) {
+	switch contract := scraper.contractAny.(type) {
 	case diaoraclev3.DIAOracleV3:
-		keysCopy := make([]string, len(keys))
-		copy(keysCopy, keys)
-		valuesCopy := make([]*big.Float, len(values))
-		copy(valuesCopy, values)
-
-		select {
-		case scraper.publishCh <- publishJob{
-			keys:      keysCopy,
-			values:    valuesCopy,
-			timestamp: time.Now().Unix(),
-		}:
-		default:
-			log.Warnf("updater - publish channel full, dropping update")
+		err := scraper.updateOracleMultiValuesForRWAWS(
+			contract, scraper.auth,
+			keys, values,
+			scraper.decimals,
+		)
+		if err != nil {
+			log.Warnf("updater - Failed to update Oracle: %v.", err)
 		}
+	default:
+		log.Errorf("RWAWS - unexpected contract type: %T", contract)
 	}
 }
 
@@ -890,12 +853,7 @@ func chooseName(msg rwaWSMessage) string {
 func nextTimestamp() int64 {
 	lastTimestampMu.Lock()
 	defer lastTimestampMu.Unlock()
-	now := time.Now().Unix()
-	if now <= lastTimestamp {
-		lastTimestamp++
-	} else {
-		lastTimestamp = now
-	}
+	lastTimestamp++
 	return lastTimestamp
 }
 
@@ -904,23 +862,16 @@ func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 	auth *bind.TransactOpts,
 	keys []string,
 	values []*big.Float,
-	timestamp int64,
 	decimals int64) error {
 
 	var cValues []*big.Int
-	var filteredKeys []string
 	var gasPrice *big.Int
 
 	multiplier := new(big.Float).SetInt(
 		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
 	)
 
-	for i, key := range keys {
-		if time.Since(time.Unix(timestamp, 0)) > time.Minute {
-			log.Infof("updater - %s: skipping stale update (source timestamp=%d)", key, timestamp)
-			continue
-		}
-
+	for i := range keys {
 		submitTimestamp := nextTimestamp()
 
 		scaled := new(big.Float).Mul(values[i], multiplier)
@@ -929,19 +880,13 @@ func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 		cValue := new(big.Int).Lsh(scaledInt, 128)
 		cValue = cValue.Add(cValue, big.NewInt(submitTimestamp))
 		cValues = append(cValues, cValue)
-		filteredKeys = append(filteredKeys, key)
-	}
-
-	if len(filteredKeys) == 0 {
-		log.Infof("updater - all keys skipped, no oracle update needed")
-		return nil
 	}
 
 	tx, err := contract.SetMultipleValues(&bind.TransactOpts{
 		From:     auth.From,
 		Signer:   auth.Signer,
 		GasPrice: gasPrice,
-	}, filteredKeys, cValues)
+	}, keys, cValues)
 	if err != nil {
 		return err
 	}
