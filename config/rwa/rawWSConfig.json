@@ -3,7 +3,7 @@
   "US_Stocks": ["AMZN", "NVDA", "COIN", "MSTR", "TSLA", "CRCL", "BMNR"],
   "FX": ["EUR/USD", "GBP/USD", "JPY/USD"],
   "Commodities": ["C_1", "CL1"],
-  "US_ETF": ["IBHG", "IAU", "SPYM", "SIVR", "PPLT"],
+  "US_ETF": ["IBHG", "IAU", "SPYM", "SIVR", "PPLT", "SPY", "QQQ", "IWM"],
   "DeviationThresholds": {
       "IAU": 0.001,
       "SIVR": 0.001,
@@ -11,6 +11,9 @@
       "CRCL": 0.001,
       "BMNR": 0.001,
       "IBHG": 0.001,
-      "SPYM": 0.0001
+      "SPYM": 0.0001,
+      "SPY": 0.001,
+      "QQQ": 0.001,
+      "IWM": 0.001
   }
 }
