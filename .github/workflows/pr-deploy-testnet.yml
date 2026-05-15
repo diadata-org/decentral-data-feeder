@@ -97,15 +97,14 @@ jobs:
           echo "  ${ECR_REGISTRY}/lumina/decentral-data-feeder:${IMAGE_TAG}"
 
       - name: Checkout lumina-infra repository
-        env:
-          LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
-        run: |
-          rm -rf lumina-infra
-          git clone -q https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra lumina-infra
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: diadata-org/lumina-infra
+          token: ${{ secrets.LUMINA_INFRA_PAT }}
+          path: lumina-infra
 
       - name: Update AWS testnet data feeder values and push to lumina-infra
         env:
-          LUMINA_INFRA_PAT: ${{ secrets.LUMINA_INFRA_PAT }}
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           cd lumina-infra
@@ -143,7 +142,7 @@ jobs:
           if ! git diff --quiet; then
             git add helmcharts/data-feeders-aws/${FOLDER}/
             git commit -m "Deploy decentral-data-feeder (${FOLDER}) to testnet (commit-hash-${{ env.COMMIT_HASH }})"
-            git push https://$LUMINA_INFRA_PAT@github.com/diadata-org/lumina-infra.git HEAD:master
+            git push origin HEAD:master
             echo "Pushed updates to lumina-infra. ArgoCD will sync ${FOLDER} testnet feeders automatically."
           else
             echo "No changes to commit"
