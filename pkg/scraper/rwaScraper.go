@@ -129,9 +129,6 @@ type RWAWSScraper struct {
 	publishCh chan publishJob
 
 	deviationThresholds map[string]float64
-
-	lastSubmittedTimestamps   map[string]int64
-	lastSubmittedTimestampsMu sync.Mutex
 }
 
 type publishJob struct {
@@ -184,7 +181,6 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		lastPublishedTimes:      make(map[string]time.Time),
 		forcePublishAfter:       time.Duration(forcePublishAfterSec) * time.Second,
 		decimals:                decimals,
-		lastSubmittedTimestamps: make(map[string]int64),
 	}
 
 	if s.apiKey == "" {
@@ -941,7 +937,7 @@ func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 
 	for i, key := range keys {
 		if time.Since(time.Unix(timestamp, 0)) > time.Minute {
-			log.Infof("updater - %s: skipping stale update (source timestamp=%d, onchain=%d)", key, timestamp, cachedTimestamp)
+			log.Infof("updater - %s: skipping stale update (source timestamp=%d)", key, timestamp)
 			continue
 		}
 
