@@ -276,9 +276,6 @@ func (scraper *RWAWSScraper) mainLoop() {
 }
 
 func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
-	scraper.publishMu.Lock()
-	defer scraper.publishMu.Unlock()
-
 	log.Infof("collected %v responses. make oracle update...", len(values))
 
 	switch contract := scraper.contractAny.(type) {
@@ -578,6 +575,9 @@ func (scraper *RWAWSScraper) scheduleFlushAfter(delay time.Duration) {
 }
 
 func (scraper *RWAWSScraper) publishPendingBatch() {
+	scraper.publishMu.Lock()
+	defer scraper.publishMu.Unlock()
+
 	scraper.pendingMu.Lock()
 	if len(scraper.pendingQuotes) == 0 {
 		scraper.pendingMu.Unlock()
