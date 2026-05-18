@@ -128,7 +128,7 @@ type RWAWSScraper struct {
 	decimals int64
 	deviationThresholds map[string]float64
 
-	publishMu sync.Mutex
+	publishTrigger chan struct{}
 }
 
 func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string, decimals int64) *RWAWSScraper {
@@ -186,6 +186,7 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 	}
 
 	s.heartbeatTicker = time.NewTicker(10 * time.Second)
+	s.publishTrigger = make(chan struct{}, 1)
 
 	lastTimestampMu.Lock()
 	lastTimestamp = time.Now().Unix()
@@ -193,6 +194,7 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 
 	go s.mainLoop()
 	go s.heartbeatLoop()
+	go s.publishLoop()
 	return s
 }
 
@@ -273,6 +275,26 @@ func (scraper *RWAWSScraper) mainLoop() {
 			}
 		}
 	}
+}
+
+func (scraper *RWAWSScraper) publishLoop() {
+    for {
+        select {
+        case <-scraper.ctx.Done():
+            return
+        case <-scraper.closed:
+            return
+        case <-scraper.publishTrigger:
+            scraper.publishPendingBatch()
+        }
+    }
+}
+
+func (scraper *RWAWSScraper) triggerPublish() {
+    select {
+    case scraper.publishTrigger <- struct{}{}:
+    default:
+    }
 }
 
 func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
@@ -545,7 +567,7 @@ func (scraper *RWAWSScraper) maybePublishNowOrSchedule() {
 	}
 
 	if lastPublish.IsZero() || now.Sub(lastPublish) >= scraper.publishCooldown {
-		scraper.publishPendingBatch()
+		scraper.triggerPublish()
 		return
 	}
 
@@ -562,22 +584,15 @@ func (scraper *RWAWSScraper) scheduleFlushAfter(delay time.Duration) {
 	}
 
 	scraper.flushTimer = time.AfterFunc(delay, func() {
-		scraper.publishPendingBatch()
+		scraper.triggerPublish()
 
 		scraper.flushTimerMu.Lock()
 		scraper.flushTimer = nil
 		scraper.flushTimerMu.Unlock()
-
-		// In case more messages arrived while publishing and cooldown already passed
-		// by the time we finished, check again.
-		scraper.maybePublishNowOrSchedule()
 	})
 }
 
 func (scraper *RWAWSScraper) publishPendingBatch() {
-	scraper.publishMu.Lock()
-	defer scraper.publishMu.Unlock()
-
 	scraper.pendingMu.Lock()
 	if len(scraper.pendingQuotes) == 0 {
 		scraper.pendingMu.Unlock()
