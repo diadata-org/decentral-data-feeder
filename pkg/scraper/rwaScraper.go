@@ -126,6 +126,8 @@ type RWAWSScraper struct {
 
 	decimals int64
 	deviationThresholds map[string]float64
+
+	publishMu sync.Mutex
 }
 
 func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string, decimals int64) *RWAWSScraper {
@@ -273,6 +275,9 @@ func (scraper *RWAWSScraper) mainLoop() {
 }
 
 func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
+	scraper.publishMu.Lock()
+	defer scraper.publishMu.Unlock()
+
 	log.Infof("collected %v responses. make oracle update...", len(values))
 
 	switch contract := scraper.contractAny.(type) {
