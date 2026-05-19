@@ -27,8 +27,6 @@ const (
 )
 
 var (
-	lastTimestampMu          sync.Mutex
-	lastTimestamp            int64
 	rwawsConfigUpdateSeconds int
 )
 
@@ -129,6 +127,8 @@ type RWAWSScraper struct {
 	deviationThresholds map[string]float64
 
 	publishTrigger chan struct{}
+
+	lastSubmittedTs int64
 }
 
 func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string, decimals int64) *RWAWSScraper {
@@ -187,10 +187,6 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 
 	s.heartbeatTicker = time.NewTicker(10 * time.Second)
 	s.publishTrigger = make(chan struct{}, 1)
-
-	lastTimestampMu.Lock()
-	lastTimestamp = time.Now().Unix()
-	lastTimestampMu.Unlock()
 
 	go s.mainLoop()
 	go s.heartbeatLoop()
@@ -870,13 +866,6 @@ func chooseName(msg rwaWSMessage) string {
 	return "unknown"
 }
 
-func nextTimestamp() int64 {
-	lastTimestampMu.Lock()
-	defer lastTimestampMu.Unlock()
-	lastTimestamp++
-	return lastTimestamp
-}
-
 func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 	contract diaoraclev3.DIAOracleV3,
 	auth *bind.TransactOpts,
@@ -891,9 +880,14 @@ func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
 		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
 	)
 
-	for i := range keys {
-		submitTimestamp := nextTimestamp()
+	submitTimestamp := time.Now().Unix()
 
+	if submitTimestamp <= scraper.lastSubmittedTs {
+		submitTimestamp = scraper.lastSubmittedTs + 1
+	}
+	scraper.lastSubmittedTs = submitTimestamp
+
+	for i := range keys {
 		scaled := new(big.Float).Mul(values[i], multiplier)
 		scaledInt, _ := scaled.Int(nil)
 
