@@ -87,6 +87,18 @@ func OracleUpdateExecutor(
 					values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
 				}
 
+			case scraper.BELO:
+
+				var beloQuote scraper.BeloQuote
+				err := json.Unmarshal(data, &beloQuote)
+				if err != nil {
+					log.Error("Unmarshal belo response: ", err)
+					continue
+				}
+				log.Infof("got belo quote %s -- %v", beloQuote.PairCode, beloQuote.Bid)
+				keys = append(keys, beloQuote.PairCode)
+				values = append(values, utils.ScaleFloat(beloQuote.Bid, decimalsOracleValue))
+
 			case scraper.PARTICULA:
 				tokenRating := make(map[string]int64)
 				err := json.Unmarshal(data, &tokenRating)

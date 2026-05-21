@@ -13,7 +13,23 @@ type RWAConfig struct {
 	ETF         []string `json:"ETF"`
 }
 
+type BeloConfig struct {
+	Pairs []string `json:"Pairs"`
+}
+
 func GetRWAConfig(filename string) (c RWAConfig, err error) {
+
+	data, err := utils.ReadFile(filename)
+	if err != nil {
+		return
+	}
+
+	err = json.Unmarshal(data, &c)
+	return
+
+}
+
+func GetBeloConfig(filename string) (c BeloConfig, err error) {
 
 	data, err := utils.ReadFile(filename)
 	if err != nil {

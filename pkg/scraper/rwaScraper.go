@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	RWAWS         = "RWAWS"
 	RAW_WS_CONFIG = "rawWSConfig.json"
 	rwaWSURL      = "wss://ws.twelvedata.com/v1/quotes/price"
 )
@@ -190,6 +189,12 @@ func (scraper *RWAWSScraper) Close() error {
 func (scraper *RWAWSScraper) mainLoop() {
 	if err := scraper.connectAndSubscribe(); err != nil {
 		log.Fatal("RWAWS connectAndSubscribe: ", err)
+	}
+
+	configUpdateSeconds, err := strconv.Atoi(utils.Getenv("RWAWS_CONFIG_UPDATE_SECONDS", "86400"))
+	if err != nil {
+		log.Errorf("parse RWAWS_CONFIG_UPDATE_SECONDS: %v", err)
+		configUpdateSeconds = 86400
 	}
 
 	scraper.heartbeatTicker = time.NewTicker(10 * time.Second)

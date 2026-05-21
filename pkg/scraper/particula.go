@@ -17,7 +17,6 @@ import (
 
 // API Configuration
 const (
-	PARTICULA                   = "Particula"
 	PARTICULA_BASE_URL          = "https://api.particula.io"
 	PARTICULA_AUTH_URL          = PARTICULA_BASE_URL + "/oauth/token"
 	PARTICULA_PRECISION         = 1e8

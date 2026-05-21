@@ -12,11 +12,10 @@ import (
 )
 
 const (
-	TWELVEDATA                  = "TwelveData"
 	DIA_TICKER_SEPARATOR        = "-"
 	TWELVEDATA_TICKER_SEPARATOR = "/"
 	RWA_MARKET_SEPARATOR        = ","
-	CONFIG_PATH                 = "rwaConfig.json"
+	TWELVEDATA_CONFIG_PATH      = "rwaConfig.json"
 
 	NyseOpen    dataType = "NyseOpen"
 	Equities    dataType = "Equities"
@@ -26,8 +25,6 @@ const (
 )
 
 var (
-	twelvedataUpdateSeconds int64
-	configUpdateSeconds     int
 	twelvedataApiBaseString = "https://api.twelvedata.com/"
 	diadataApiBaseString    = "https://api.diadata.org/v1/"
 )
@@ -64,38 +61,35 @@ type TwelvedataQuote struct {
 }
 
 type TwelvedataScraper struct {
-	dataChannel       chan []byte
-	updateDoneChannel chan bool
-	ticker            *time.Ticker
-	stockSymbols      []string
-	stockMarketOpen   bool
-	fXTickers         []string
-	commodities       []string
-	eTFs              []string
-	apiKey            string
-}
-
-func init() {
-	var err error
-	twelvedataUpdateSeconds, err = strconv.ParseInt(utils.Getenv("UPDATE_SECONDS", "30"), 10, 64)
-	if err != nil {
-		log.Error("Parse UPDATE_SECONDS: ", err)
-	}
-
-	configUpdateSeconds, err = strconv.Atoi(utils.Getenv("CONFIG_UPDATE_SECONDS", "86400"))
-	if err != nil {
-		log.Errorf("parse CONFIG_UPDATE_SECONDS: %v", err)
-		configUpdateSeconds = 86400
-	}
+	dataChannel        chan []byte
+	updateDoneChannel  chan bool
+	updateTicker       *time.Ticker
+	configUpdateTicker *time.Ticker
+	stockSymbols       []string
+	stockMarketOpen    bool
+	fXTickers          []string
+	commodities        []string
+	eTFs               []string
+	apiKey             string
 }
 
 func NewTwelvedataScraper() *TwelvedataScraper {
+	updateSeconds, err := strconv.ParseInt(utils.Getenv("TWELVEDATA_UPDATE_SECONDS", "30"), 10, 64)
+	if err != nil {
+		log.Error("Parse TWELVEDATA_UPDATE_SECONDS: ", err)
+	}
+	configUpdateSeconds, err := strconv.Atoi(utils.Getenv("TWELVEDATA_CONFIG_UPDATE_SECONDS", "86400"))
+	if err != nil {
+		log.Errorf("parse TWELVEDATA_CONFIG_UPDATE_SECONDS: %v", err)
+		configUpdateSeconds = 86400
+	}
 
 	s := &TwelvedataScraper{
-		ticker: time.NewTicker(time.Duration(twelvedataUpdateSeconds) * time.Second),
-		apiKey: utils.Getenv("TWELVEDATA_API_KEY", ""),
+		updateTicker:       time.NewTicker(time.Duration(updateSeconds) * time.Second),
+		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
+		apiKey:             utils.Getenv("TWELVEDATA_API_KEY", ""),
 	}
-	err := s.updateConfig(CONFIG_PATH)
+	err = s.updateConfig(TWELVEDATA_CONFIG_PATH)
 	if err != nil {
 		log.Fatal("Could not load configuration file: ", err)
 	}
@@ -114,9 +108,8 @@ func (scraper *TwelvedataScraper) mainLoop() {
 
 	// Routine that periodically fetches the config.
 	go func() {
-		configTicker := time.NewTicker(time.Duration(time.Duration(configUpdateSeconds) * time.Second))
-		for range configTicker.C {
-			err := scraper.updateConfig(CONFIG_PATH)
+		for range scraper.configUpdateTicker.C {
+			err := scraper.updateConfig(TWELVEDATA_CONFIG_PATH)
 			if err != nil {
 				log.Errorf("updateConfig %v", err)
 			}
@@ -131,7 +124,7 @@ func (scraper *TwelvedataScraper) mainLoop() {
 	scraper.updateDoneChannel <- true
 
 	// Update every @twelvedataUpdateSeconds.
-	for range scraper.ticker.C {
+	for range scraper.updateTicker.C {
 		err := scraper.UpdateQuotations()
 		if err != nil {
 			log.Error(err)

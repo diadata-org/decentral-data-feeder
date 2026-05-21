@@ -15,6 +15,8 @@ func NewDataScraper(source string) DataScraper {
 		return NewCGScraper()
 	case TWELVEDATA:
 		return NewTwelvedataScraper()
+	case BELO:
+		return NewBeloScraper()
 	case PARTICULA:
 		return NewParticulaScraper()
 	case RWAWS:
