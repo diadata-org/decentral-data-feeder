@@ -73,6 +73,7 @@ type rwaWSSubscribeMessage struct {
 
 type rwaWSSubscribeParams struct {
 	Symbols string `json:"symbols"`
+	Prepost bool   `json:"prepost,omitempty"`
 }
 
 type rwaWSHeartbeatMessage struct {
@@ -386,6 +387,7 @@ func (scraper *RWAWSScraper) subscribeAll() error {
 		Action: "subscribe",
 		Params: rwaWSSubscribeParams{
 			Symbols: strings.Join(symbols, ","),
+			Prepost: true,
 		},
 	}
 
@@ -776,7 +778,7 @@ func (scraper *RWAWSScraper) getStockMarketStatus(msg rwaWSMessage) (bool, bool,
 	// NYSE / NASDAQ
 	if mic == "XNYS" || mic == "XNAS" || mic == "BATS" || exchange == "NYSE" || exchange == "NASDAQ" || exchange == "CBOE" {
 		holiday := scraper.isNYSEHoliday(now)
-		open := scraper.isNYSEMarketOpen(now)
+		open := scraper.isNYSETradingHours(now)
 		return holiday, open, true
 	}
 
@@ -808,7 +810,7 @@ func (scraper *RWAWSScraper) isNYSEHoliday(now time.Time) bool {
 	return nyse.IsHoliday(now)
 }
 
-func (scraper *RWAWSScraper) isNYSEMarketOpen(now time.Time) bool {
+func (scraper *RWAWSScraper) isNYSETradingHours(now time.Time) bool {
 	if scraper.isNYSEHoliday(now) {
 		return false
 	}
@@ -821,7 +823,8 @@ func (scraper *RWAWSScraper) isNYSEMarketOpen(now time.Time) bool {
 	now = now.In(loc)
 
 	minutes := now.Hour()*60 + now.Minute()
-	return minutes >= 9*60+30 && minutes < 16*60
+	// extended hours: 7:00 AM to 8:00 PM
+	return minutes >= 7*60 && minutes < 20*60
 }
 
 func parseRawFloat(raw json.RawMessage) (float64, error) {
