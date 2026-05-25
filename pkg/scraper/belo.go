@@ -39,6 +39,7 @@ type BeloScraper struct {
 	pairs              []string
 	updateTicker       *time.Ticker
 	configUpdateTicker *time.Ticker
+	branchMarketConfig string
 	dataChannel        chan []byte
 	updateDoneChannel  chan bool
 	pairSeparator      string
@@ -47,7 +48,7 @@ type BeloScraper struct {
 func NewBeloScraper() *BeloScraper {
 	updateSecs, err := strconv.ParseInt(utils.Getenv("BELO_UPDATE_SECONDS", "30"), 10, 64)
 	if err != nil {
-		log.Println("Parse BELO_UPDATE_SECONDS:", err)
+		log.Error("Parse BELO_UPDATE_SECONDS:", err)
 		updateSecs = 30
 	}
 	configUpdateSeconds, err := strconv.Atoi(utils.Getenv("BELO_CONFIG_UPDATE_SECONDS", "86400"))
@@ -59,6 +60,7 @@ func NewBeloScraper() *BeloScraper {
 	scraper := &BeloScraper{
 		updateTicker:       time.NewTicker(time.Duration(updateSecs) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
+		branchMarketConfig: utils.Getenv("BELO_BRANCH_MARKET_CONFIG", ""),
 		pairSeparator:      "/",
 	}
 	scraper.dataChannel = make(chan []byte)
@@ -88,14 +90,14 @@ func (scraper *BeloScraper) mainLoop() {
 	// Initial run
 	err := scraper.UpdatePrices(BELO_BASE_URL)
 	if err != nil {
-		log.Println("BELO scraper initial update error:", err)
+		log.Error("BELO scraper initial update error:", err)
 	}
 	scraper.updateDoneChannel <- true
 
 	for range scraper.updateTicker.C {
 		err := scraper.UpdatePrices(BELO_BASE_URL)
 		if err != nil {
-			log.Println("BELO scraper update error:", err)
+			log.Error("BELO scraper update error:", err)
 			continue
 		}
 		scraper.updateDoneChannel <- true
@@ -179,7 +181,7 @@ func (scraper *BeloScraper) Close() error {
 
 func (scraper *BeloScraper) updateConfig(filePath string) error {
 
-	beloConfig, err := models.GetBeloConfig(filePath)
+	beloConfig, err := models.GetBeloConfig(filePath, scraper.branchMarketConfig)
 	if err != nil {
 		return err
 	}

@@ -17,9 +17,9 @@ type BeloConfig struct {
 	Pairs []string `json:"Pairs"`
 }
 
-func GetRWAConfig(filename string) (c RWAConfig, err error) {
+func GetRWAConfig(filename string, branch string) (c RWAConfig, err error) {
 
-	data, err := utils.ReadFile(filename)
+	data, err := utils.ReadFile(filename, branch)
 	if err != nil {
 		return
 	}
@@ -29,9 +29,9 @@ func GetRWAConfig(filename string) (c RWAConfig, err error) {
 
 }
 
-func GetBeloConfig(filename string) (c BeloConfig, err error) {
+func GetBeloConfig(filename string, branch string) (c BeloConfig, err error) {
 
-	data, err := utils.ReadFile(filename)
+	data, err := utils.ReadFile(filename, branch)
 	if err != nil {
 		return
 	}
