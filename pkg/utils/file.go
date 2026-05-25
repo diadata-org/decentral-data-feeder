@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
-	"os/user"
 	"strconv"
 	"time"
 
@@ -24,6 +24,7 @@ func readFromFile(filename string) (data []byte, err error) {
 	var (
 		jsonFile *os.File
 	)
+
 	path := os.Getenv("GOPATH") + "/src/github.com/diadata-org/decentral-data-feeder/config/rwa/" + filename
 	jsonFile, err = os.Open(path)
 	if err != nil {
@@ -40,11 +41,17 @@ func readFromFile(filename string) (data []byte, err error) {
 
 }
 
-func readFromRemote(filename string) (data []byte, err error) {
+func readFromRemote(filename string, branch string) (data []byte, err error) {
 
-	url := "https://api.github.com/repos/diadata-org/decentral-data-feeder/contents/config/rwa/" + filename
+	URL := "https://api.github.com/repos/diadata-org/decentral-data-feeder/contents/config/rwa/" + filename
+	if branch != "" {
+		URL += "?ref=" + url.QueryEscape(branch)
+	}
 
-	req, _ := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", URL, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	//Optional authentication
 	githubToken := Getenv("GITHUB_TOKEN", "")
@@ -105,12 +112,19 @@ func readFromRemote(filename string) (data []byte, err error) {
 
 }
 
-func ReadFile(filename string) ([]byte, error) {
-	usr, _ := user.Current()
-	dir := usr.HomeDir
-	if dir == "/root" || dir == "/home" {
-		return readFromRemote(filename)
+func ReadFile(filename string, branch string) ([]byte, error) {
+	jsonFile, err := readFromRemote(filename, branch)
+	if err != nil {
+		log.Errorf("Failed to read %s from remote config: %v", filename, err)
+		jsonFile, err = readFromFile(filename)
+		if err != nil {
+			log.Errorf("Failed to read %s from local config: %v", filename, err)
+			return nil, err
+		}
+		log.Infof("Read %s from local config", filename)
+	} else {
+		log.Infof("Read %s from remote config", filename)
 	}
+	return jsonFile, nil
 
-	return readFromFile(filename)
 }

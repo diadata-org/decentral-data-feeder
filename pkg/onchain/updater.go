@@ -152,8 +152,7 @@ func OracleUpdateExecutor(
 			case diaoraclev3.DIAOracleV3:
 				err := updateOracleMultiValues(contract, auth, keys, values, time.Now().Unix(), isFirstRun)
 				if err != nil {
-					log.Warnf("updater - Failed to update Oracle: %v.", err)
-					return
+					log.Errorf("updater - Failed to update Oracle: %v.", err)
 				}
 
 			default:

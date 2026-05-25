@@ -65,6 +65,7 @@ type TwelvedataScraper struct {
 	updateDoneChannel  chan bool
 	updateTicker       *time.Ticker
 	configUpdateTicker *time.Ticker
+	branchMarketConfig string
 	stockSymbols       []string
 	stockMarketOpen    bool
 	fXTickers          []string
@@ -88,6 +89,7 @@ func NewTwelvedataScraper() *TwelvedataScraper {
 		updateTicker:       time.NewTicker(time.Duration(updateSeconds) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
 		apiKey:             utils.Getenv("TWELVEDATA_API_KEY", ""),
+		branchMarketConfig: utils.Getenv("TWELVEDATA_BRANCH_MARKET_CONFIG", ""),
 	}
 	err = s.updateConfig(TWELVEDATA_CONFIG_PATH)
 	if err != nil {
@@ -241,7 +243,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		quote, err := getRwaQuoteFromDia(ticker, "Commodities")
 		if err != nil && scraper.apiKey != "" {
 			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
-			quotation, err := scraper.getTwelveQuote(ticker)
+			quotation, err := scraper.getTwelveQuote(ticker, true)
 			if err != nil {
 				log.Error("getTwelveCommoditiesData: ", err)
 			}
@@ -279,7 +281,7 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		quote, err := getRwaQuoteFromDia(ticker, "ETF")
 		if err != nil && scraper.apiKey != "" {
 			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
-			quotation, err := scraper.getTwelveQuote(ticker)
+			quotation, err := scraper.getTwelveQuote(ticker, false)
 			if err != nil {
 				log.Error("getTwelveETFData: ", err)
 			}
@@ -344,7 +346,7 @@ func (scraper *TwelvedataScraper) getTwelveStockPrice(symbol string) (stockPrice
 	return
 }
 
-func (scraper *TwelvedataScraper) getTwelveQuote(symbol string) (commodity twelvedataQuoteResponse, err error) {
+func (scraper *TwelvedataScraper) getTwelveQuote(symbol string, comm bool) (commodity twelvedataQuoteResponse, err error) {
 	var response []byte
 
 	symbols := strings.Split(symbol, DIA_TICKER_SEPARATOR)
@@ -352,7 +354,12 @@ func (scraper *TwelvedataScraper) getTwelveQuote(symbol string) (commodity twelv
 		symbol = symbols[0] + TWELVEDATA_TICKER_SEPARATOR + symbols[1]
 	}
 
-	apiURL := twelvedataApiBaseString + "quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
+	var apiURL string
+	if comm {
+		apiURL = twelvedataApiBaseString + "quote?symbol=" + symbol + "&exchange=commodity" + "&apikey=" + scraper.apiKey
+	} else {
+		apiURL = twelvedataApiBaseString + "quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
+	}
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {
 		return
@@ -385,7 +392,7 @@ func getRwaQuoteFromDia(symbol string, assetType string) (tq TwelvedataQuote, er
 }
 
 func (scraper *TwelvedataScraper) updateConfig(filePath string) error {
-	rwaConfig, err := models.GetRWAConfig(filePath)
+	rwaConfig, err := models.GetRWAConfig(filePath, scraper.branchMarketConfig)
 	if err != nil {
 		return err
 	}
