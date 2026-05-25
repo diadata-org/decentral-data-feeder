@@ -48,7 +48,10 @@ func readFromRemote(filename string, branch string) (data []byte, err error) {
 		URL += "?ref=" + url.QueryEscape(branch)
 	}
 
-	req, _ := http.NewRequest("GET", URL, nil)
+	req, err := http.NewRequest("GET", URL, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	//Optional authentication
 	githubToken := Getenv("GITHUB_TOKEN", "")
