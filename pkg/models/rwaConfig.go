@@ -37,8 +37,8 @@ func GetRWAConfig(filename string, branch string) (c RWAConfig, err error) {
 	return
 }
 
-func GetRWAWSConfig(filename string) (c RWAWSConfig, err error) {
-	data, err := utils.ReadFile(filename)
+func GetRWAWSConfig(filename string, branch string) (c RWAWSConfig, err error) {
+	data, err := utils.ReadFile(filename, branch)
 	if err != nil {
 		return
 	}

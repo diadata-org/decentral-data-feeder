@@ -255,7 +255,7 @@ func (scraper *RWAWSScraper) mainLoop() {
 		case <-scraper.closed:
 			return
 		case <-scraper.configTicker.C:
-			if err := scraper.updateConfig(RAW_WS_CONFIG, ""); err != nil {
+			if err := scraper.updateConfig(RAW_WS_CONFIG, "new_branch_rwa"); err != nil {
 				log.Errorf("RWAWS updateConfig: %v", err)
 			}
 
@@ -685,29 +685,8 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketSt
 	return keys, values
 }
 
-func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
-	log.Infof("collected %v responses. make oracle update...", len(values))
-
-	switch contract := scraper.contractAny.(type) {
-	case *diaoraclev3.DIAOracleV3:
-		keysCopy := make([]string, len(keys))
-		copy(keysCopy, keys)
-		valuesCopy := make([]*big.Float, len(values))
-		copy(valuesCopy, values)
-
-		ts := nextTimestamp()
-
-		go func() {
-			err := updateOracleMultiValuesForRWAWS(*contract, scraper.auth, keysCopy, valuesCopy, ts, scraper.decimals)
-			if err != nil {
-				log.Warnf("updater - Failed to update Oracle: %v.", err)
-			}
-		}()
-	}
-}
-
 func (scraper *RWAWSScraper) updateConfig(filename string, branch string) error {
-	c, err := models.GetRWAConfig(filename, branch)
+	c, err := models.GetRWAWSConfig(filename, branch)
 	if err != nil {
 		return err
 	}
