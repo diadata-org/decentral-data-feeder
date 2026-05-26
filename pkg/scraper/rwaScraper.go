@@ -23,6 +23,7 @@ import (
 const (
 	RAW_WS_CONFIG = "rawWSConfig.json"
 	rwaWSURL      = "wss://ws.twelvedata.com/v1/quotes/price"
+	Crypto dataType = "Crypto"
 )
 
 var (
@@ -96,6 +97,7 @@ type RWAWSScraper struct {
 	hkStocks    []string
 	usStocks    []string
 	fxTickers   []string
+	crypto []string
 	commodities []string
 	usEtfs      []string
 
@@ -521,6 +523,9 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 	case contains(scraper.commodities, msg.Symbol):
 		quote.Type = Commodities
 
+	case contains(scraper.crypto, msg.Symbol):
+		quote.Type = Crypto
+
 	default:
 		log.Warnf("RWAWS - received unconfigured symbol: %s", msg.Symbol)
 		return nil
@@ -691,14 +696,16 @@ func (scraper *RWAWSScraper) updateConfig(filename string) error {
 	scraper.usStocks = c.US_Stocks
 	scraper.hkStocks = c.HK_Stocks
 	scraper.fxTickers = c.FX
+	scraper.crypto = c.Crypto
 	scraper.commodities = c.Commodities
 	scraper.usEtfs = c.US_ETF
 	scraper.deviationThresholds = c.DeviationThresholds
 
-	log.Infof("RWAWS - loaded config: hkstocks=%d usstocks=%d fx=%d commodities=%d usetfs=%d",
+	log.Infof("RWAWS - loaded config: hkstocks=%d usstocks=%d fx=%d crypto=%d commodities=%d usetfs=%d",
 		getNumSymbols(scraper.hkStocks),
 		getNumSymbols(scraper.usStocks),
 		getNumSymbols(scraper.fxTickers),
+		getNumSymbols(scraper.crypto),
 		getNumSymbols(scraper.commodities),
 		getNumSymbols(scraper.usEtfs),
 	)
@@ -755,6 +762,7 @@ func (scraper *RWAWSScraper) allSymbols() []string {
 	appendUnique(scraper.hkStocks)
 	appendUnique(scraper.usStocks)
 	appendUnique(scraper.fxTickers)
+	appendUnique(scraper.crypto)
 	appendUnique(scraper.commodities)
 	appendUnique(scraper.usEtfs)
 
