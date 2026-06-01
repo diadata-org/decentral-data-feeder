@@ -80,7 +80,7 @@ func (scraper *BeloScraper) mainLoop() {
 	// Periodically fetch configuration.
 	go func() {
 		for range scraper.configUpdateTicker.C {
-			err := scraper.updateConfig(TWELVEDATA_CONFIG_PATH)
+			err := scraper.updateConfig(BELO_CONFIG_PATH)
 			if err != nil {
 				log.Errorf("updateConfig %v", err)
 			}
