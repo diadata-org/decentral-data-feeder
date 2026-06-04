@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/models"
 	utils "github.com/diadata-org/decentral-data-feeder/pkg/utils"
+	diaoraclev3 "github.com/diadata-org/lumina-library/contracts/lumina/diaoraclev3"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ws "github.com/gorilla/websocket"
 	calendar "github.com/scmhub/calendar"
 )
@@ -19,6 +23,11 @@ import (
 const (
 	RAW_WS_CONFIG = "rawWSConfig.json"
 	rwaWSURL      = "wss://ws.twelvedata.com/v1/quotes/price"
+	Crypto dataType = "Crypto"
+)
+
+var (
+	rwawsConfigUpdateSeconds int
 )
 
 type RWAWSQuote struct {
@@ -64,6 +73,7 @@ type rwaWSSubscribeMessage struct {
 
 type rwaWSSubscribeParams struct {
 	Symbols string `json:"symbols"`
+	Prepost bool   `json:"prepost,omitempty"`
 }
 
 type rwaWSHeartbeatMessage struct {
@@ -73,9 +83,6 @@ type rwaWSHeartbeatMessage struct {
 type RWAWSScraper struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	dataChannel       chan []byte
-	updateDoneChannel chan bool
 
 	apiKey string
 	wsURL  string
@@ -87,10 +94,12 @@ type RWAWSScraper struct {
 	closeOnce sync.Once
 	closed    chan struct{}
 
-	stockSymbols []string
-	fxTickers    []string
-	commodities  []string
-	etfs         []string
+	hkStocks    []string
+	usStocks    []string
+	fxTickers   []string
+	crypto []string
+	commodities []string
+	usEtfs      []string
 
 	pendingMu     sync.Mutex
 	pendingQuotes map[string]RWAWSQuote
@@ -105,9 +114,26 @@ type RWAWSScraper struct {
 
 	hkLoc *time.Location
 	hkex  *calendar.Calendar
+
+	// for oracle update
+	auth        *bind.TransactOpts
+	contractAny any
+	chainId     int64
+	source      string
+
+	lastPublishedPrices map[string]float64
+	lastPublishedTimes  map[string]time.Time
+	forcePublishAfter   time.Duration
+
+	decimals int64
+	deviationThresholds map[string]float64
+
+	publishTrigger chan struct{}
+
+	lastSubmittedTs int64
 }
 
-func NewRWAWSScraper() *RWAWSScraper {
+func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, source string, decimals int64) *RWAWSScraper {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	publishIntervalMs, err := strconv.Atoi(utils.Getenv("RWA_WS_PUBLISH_INTERVAL_MS", "600"))
@@ -122,18 +148,35 @@ func NewRWAWSScraper() *RWAWSScraper {
 		hkLoc = time.FixedZone("HKT", 8*3600)
 	}
 
+	forcePublishAfterSec, err := strconv.Atoi(utils.Getenv("RWA_WS_FORCE_PUBLISH_AFTER_SECONDS", "30"))
+	if err != nil {
+		forcePublishAfterSec = 30
+	}
+
+	rwawsConfigUpdateSeconds, err = strconv.Atoi(utils.Getenv("RWA_WS_CONFIG_UPDATE_SECONDS", "86400"))
+	if err != nil {
+		log.Errorf("parse RWA_WS_CONFIG_UPDATE_SECONDS: %v", err)
+		rwawsConfigUpdateSeconds = 86400
+	}
+
 	s := &RWAWSScraper{
-		ctx:               ctx,
-		cancel:            cancel,
-		dataChannel:       make(chan []byte),
-		updateDoneChannel: make(chan bool),
-		apiKey:            utils.Getenv("TWELVEDATA_API_KEY", ""),
-		wsURL:             utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
-		closed:            make(chan struct{}),
-		pendingQuotes:     make(map[string]RWAWSQuote),
-		publishCooldown:   time.Duration(publishIntervalMs) * time.Millisecond,
-		hkLoc:             hkLoc,
-		hkex:              calendar.XHKG(),
+		ctx:                     ctx,
+		cancel:                  cancel,
+		apiKey:                  utils.Getenv("TWELVEDATA_API_KEY", ""),
+		wsURL:                   utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
+		closed:                  make(chan struct{}),
+		pendingQuotes:           make(map[string]RWAWSQuote),
+		publishCooldown:         time.Duration(publishIntervalMs) * time.Millisecond,
+		hkLoc:                   hkLoc,
+		hkex:                    calendar.XHKG(),
+		auth:                    auth,
+		contractAny:             contractAny,
+		chainId:                 chainId,
+		source:                  source,
+		lastPublishedPrices:     make(map[string]float64),
+		lastPublishedTimes:      make(map[string]time.Time),
+		forcePublishAfter:       time.Duration(forcePublishAfterSec) * time.Second,
+		decimals:                decimals,
 	}
 
 	if s.apiKey == "" {
@@ -144,16 +187,13 @@ func NewRWAWSScraper() *RWAWSScraper {
 		log.Fatal("Could not load configuration file: ", err)
 	}
 
+	s.heartbeatTicker = time.NewTicker(10 * time.Second)
+	s.publishTrigger = make(chan struct{}, 1)
+
 	go s.mainLoop()
+	go s.heartbeatLoop()
+	go s.publishLoop()
 	return s
-}
-
-func (scraper *RWAWSScraper) DataChannel() chan []byte {
-	return scraper.dataChannel
-}
-
-func (scraper *RWAWSScraper) UpdateDoneChannel() chan bool {
-	return scraper.updateDoneChannel
 }
 
 func (scraper *RWAWSScraper) Close() error {
@@ -186,19 +226,27 @@ func (scraper *RWAWSScraper) Close() error {
 	return err
 }
 
+func (scraper *RWAWSScraper) heartbeatLoop() {
+	for {
+		select {
+		case <-scraper.ctx.Done():
+			return
+		case <-scraper.closed:
+			return
+		case <-scraper.heartbeatTicker.C:
+			if err := scraper.sendHeartbeat(); err != nil {
+				log.Debugf("RWAWS sendHeartbeat: %v", err)
+			}
+		}
+	}
+}
+
 func (scraper *RWAWSScraper) mainLoop() {
 	if err := scraper.connectAndSubscribe(); err != nil {
 		log.Fatal("RWAWS connectAndSubscribe: ", err)
 	}
 
-	configUpdateSeconds, err := strconv.Atoi(utils.Getenv("RWAWS_CONFIG_UPDATE_SECONDS", "86400"))
-	if err != nil {
-		log.Errorf("parse RWAWS_CONFIG_UPDATE_SECONDS: %v", err)
-		configUpdateSeconds = 86400
-	}
-
-	scraper.heartbeatTicker = time.NewTicker(10 * time.Second)
-	scraper.configTicker = time.NewTicker(time.Duration(configUpdateSeconds) * time.Second)
+	scraper.configTicker = time.NewTicker(time.Duration(rwawsConfigUpdateSeconds) * time.Second)
 
 	for {
 		select {
@@ -206,14 +254,8 @@ func (scraper *RWAWSScraper) mainLoop() {
 			return
 		case <-scraper.closed:
 			return
-
-		case <-scraper.heartbeatTicker.C:
-			if err := scraper.sendHeartbeat(); err != nil {
-				log.Errorf("RWAWS sendHeartbeat: %v", err)
-			}
-
 		case <-scraper.configTicker.C:
-			if err := scraper.updateConfig(RAW_WS_CONFIG, ""); err != nil {
+			if err := scraper.updateConfig(RAW_WS_CONFIG, "new_branch_rwa"); err != nil {
 				log.Errorf("RWAWS updateConfig: %v", err)
 			}
 
@@ -227,12 +269,47 @@ func (scraper *RWAWSScraper) mainLoop() {
 					return
 				default:
 				}
-				time.Sleep(2 * time.Second)
-				if err := scraper.reconnect(); err != nil {
-					log.Errorf("RWAWS reconnect: %v", err)
-				}
+				scraper.handleDisconnect()
 			}
 		}
+	}
+}
+
+func (scraper *RWAWSScraper) publishLoop() {
+    for {
+        select {
+        case <-scraper.ctx.Done():
+            return
+        case <-scraper.closed:
+            return
+        case <-scraper.publishTrigger:
+            scraper.publishPendingBatch()
+        }
+    }
+}
+
+func (scraper *RWAWSScraper) triggerPublish() {
+    select {
+    case scraper.publishTrigger <- struct{}{}:
+    default:
+    }
+}
+
+func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
+	log.Infof("collected %v responses. make oracle update...", len(values))
+
+	switch contract := scraper.contractAny.(type) {
+	case diaoraclev3.DIAOracleV3:
+		err := scraper.updateOracleMultiValuesForRWAWS(
+			contract, scraper.auth,
+			keys, values,
+			scraper.decimals,
+		)
+		if err != nil {
+			log.Warnf("updater - Failed to update Oracle: %v.", err)
+		}
+	default:
+		log.Errorf("RWAWS - unexpected contract type: %T", contract)
 	}
 }
 
@@ -247,18 +324,19 @@ func (scraper *RWAWSScraper) connectAndSubscribe() error {
 
 	conn, _, err := ws.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to dial WebSocket: %v", err)
 	}
 
 	scraper.connMu.Lock()
 	scraper.conn = conn
 	scraper.connMu.Unlock()
 
-	log.Infof("RWAWS - WebSocket connected")
+	log.Infof("RWAWS - WebSocket connected to %s", u.String())
 	return scraper.subscribeAll()
 }
 
 func (scraper *RWAWSScraper) reconnect() error {
+	log.Infof("RWAWS - closing existing connection before reconnecting")
 	scraper.connMu.Lock()
 	if scraper.conn != nil {
 		_ = scraper.conn.Close()
@@ -267,6 +345,37 @@ func (scraper *RWAWSScraper) reconnect() error {
 	scraper.connMu.Unlock()
 
 	return scraper.connectAndSubscribe()
+}
+
+func (scraper *RWAWSScraper) handleDisconnect() {
+	const maxRetries = 3
+	backoff := 2 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-scraper.ctx.Done():
+			return
+		case <-scraper.closed:
+			return
+		default:
+		}
+
+		log.Warnf("RWAWS - reconnecting... (attempt %d of %d) after %v", i+1, maxRetries, backoff)
+		time.Sleep(backoff)
+
+		if err := scraper.reconnect(); err != nil {
+			log.Errorf("RWAWS - reconnect attempt %d failed: %v", i+1, err)
+			if backoff < 60*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+
+		log.Infof("RWAWS - reconnect successful on attempt %d", i+1)
+		return
+	}
+
+	log.Fatalf("RWAWS - failed to reconnect after %d attempts, giving up", maxRetries)
 }
 
 func (scraper *RWAWSScraper) subscribeAll() error {
@@ -279,13 +388,18 @@ func (scraper *RWAWSScraper) subscribeAll() error {
 		Action: "subscribe",
 		Params: rwaWSSubscribeParams{
 			Symbols: strings.Join(symbols, ","),
+			Prepost: true,
 		},
 	}
 
 	b, _ := json.Marshal(msg)
-	log.Infof("RWAWS - subscribing payload: %s", string(b))
+	log.Infof("RWAWS - subscribing to %d symbols: %s", len(symbols), string(b))
 
-	return scraper.writeJSON(msg)
+	if err := scraper.writeJSON(msg); err != nil {
+		return fmt.Errorf("failed to subscribe to symbols: %v", err)
+	}
+
+	return nil
 }
 
 func (scraper *RWAWSScraper) sendHeartbeat() error {
@@ -332,6 +446,21 @@ func (scraper *RWAWSScraper) readMessage() error {
 	case "subscribe-status":
 		log.Infof("RWAWS - subscribe-status: status=%s code=%d msg=%s success=%v fails=%v",
 			msg.Status, msg.Code, msg.Message, msg.Success, msg.Fails)
+
+		if msg.Fails != nil {
+			switch v := msg.Fails.(type) {
+			case []interface{}:
+				if len(v) > 0 {
+					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
+					scraper.handleDisconnect()
+				}
+			case map[string]interface{}:
+				if len(v) > 0 {
+					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
+					scraper.handleDisconnect()
+				}
+			}
+		}
 		return nil
 	case "price":
 		return scraper.handlePriceMessage(msg)
@@ -367,35 +496,25 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 	}
 
 	switch {
-	case contains(scraper.stockSymbols, msg.Symbol):
+	case contains(scraper.hkStocks, msg.Symbol):
 		quote.Type = Equities
 
-		marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
-		if knownMarket {
-			quote.MarketHoliday = marketHoliday
-			quote.MarketOpen = marketOpen
-			if !marketOpen {
-				return nil
-			}
-		} else {
-			// Unknown market: do not block publishing in v1.
-			quote.MarketHoliday = false
-			quote.MarketOpen = true
+		if scraper.applyMarketStatus(msg, &quote) {
+			return nil
 		}
 
-	case contains(scraper.etfs, msg.Symbol):
+	case contains(scraper.usStocks, msg.Symbol):
+		quote.Type = Equities
+
+		if scraper.applyMarketStatus(msg, &quote) {
+			return nil
+		}
+
+	case contains(scraper.usEtfs, msg.Symbol):
 		quote.Type = ETF
 
-		marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
-		if knownMarket {
-			quote.MarketHoliday = marketHoliday
-			quote.MarketOpen = marketOpen
-			if !marketOpen {
-				return nil
-			}
-		} else {
-			quote.MarketHoliday = false
-			quote.MarketOpen = true
+		if scraper.applyMarketStatus(msg, &quote) {
+			return nil
 		}
 
 	case contains(scraper.fxTickers, msg.Symbol):
@@ -403,6 +522,9 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 
 	case contains(scraper.commodities, msg.Symbol):
 		quote.Type = Commodities
+
+	case contains(scraper.crypto, msg.Symbol):
+		quote.Type = Crypto
 
 	default:
 		log.Warnf("RWAWS - received unconfigured symbol: %s", msg.Symbol)
@@ -415,6 +537,21 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 
 	scraper.maybePublishNowOrSchedule()
 	return nil
+}
+
+func (scraper *RWAWSScraper) applyMarketStatus(msg rwaWSMessage, quote *RWAWSQuote) (drop bool) {
+	marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
+	if knownMarket {
+		quote.MarketHoliday = marketHoliday
+		quote.MarketOpen = marketOpen
+		if !marketOpen {
+			return true
+		}
+	} else {
+		quote.MarketHoliday = false
+		quote.MarketOpen = true
+	}
+	return false
 }
 
 // Publish immediately if cooldown already passed.
@@ -432,7 +569,7 @@ func (scraper *RWAWSScraper) maybePublishNowOrSchedule() {
 	}
 
 	if lastPublish.IsZero() || now.Sub(lastPublish) >= scraper.publishCooldown {
-		scraper.publishPendingBatch()
+		scraper.triggerPublish()
 		return
 	}
 
@@ -449,15 +586,11 @@ func (scraper *RWAWSScraper) scheduleFlushAfter(delay time.Duration) {
 	}
 
 	scraper.flushTimer = time.AfterFunc(delay, func() {
-		scraper.publishPendingBatch()
+		scraper.triggerPublish()
 
 		scraper.flushTimerMu.Lock()
 		scraper.flushTimer = nil
 		scraper.flushTimerMu.Unlock()
-
-		// In case more messages arrived while publishing and cooldown already passed
-		// by the time we finished, check again.
-		scraper.maybePublishNowOrSchedule()
 	})
 }
 
@@ -478,37 +611,134 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 
 	log.Infof("RWAWS - publishing batch of %d quotes", len(toFlush))
 
+	now := time.Now()
+	filtered := []RWAWSQuote{}
+
 	for _, quote := range toFlush {
-		quoteBytes, err := json.Marshal(quote)
-		if err != nil {
-			log.Error("marshal rwa ws quote: ", err)
-			continue
+		last, exists := scraper.lastPublishedPrices[quote.Symbol]
+		lastTime := scraper.lastPublishedTimes[quote.Symbol]
+
+		priceChanged := !exists || scraper.hasPriceDeviatedEnough(quote.Symbol, last, quote.Price)
+		timedOut := exists && now.Sub(lastTime) >= scraper.forcePublishAfter
+
+		if priceChanged || timedOut {
+			filtered = append(filtered, quote)
+			scraper.lastPublishedPrices[quote.Symbol] = quote.Price
+			scraper.lastPublishedTimes[quote.Symbol] = now
 		}
-		scraper.dataChannel <- quoteBytes
 	}
 
-	scraper.updateDoneChannel <- true
+	if len(filtered) == 0 {
+		log.Infof("RWAWS - all prices unchanged, skipping oracle update")
+		return
+	}
+
+	keys := []string{}
+	values := []*big.Float{}
+	marketStatusAdded := false
+
+	for _, quote := range filtered {
+		k, v := scraper.preparePublishData(quote, &marketStatusAdded)
+		keys = append(keys, k...)
+		values = append(values, v...)
+	}
+
+	scraper.publishData(keys, values)
+}
+
+func (scraper *RWAWSScraper) hasPriceDeviatedEnough(symbol string, oldPrice, newPrice float64) bool {
+	threshold, hasThreshold := scraper.deviationThresholds[symbol]
+	if !hasThreshold {
+		// any price change triggers update
+		return oldPrice != newPrice
+	}
+	if oldPrice == 0 {
+		return true
+	}
+	deviation := math.Abs(newPrice-oldPrice) / oldPrice
+	return deviation >= threshold
+}
+
+func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketStatusAdded *bool) (keys []string, values []*big.Float) {
+	log.Info("got rwa ws data: ", rwaResponse)
+
+	if (rwaResponse.Type == Equities || rwaResponse.Type == ETF) && !*marketStatusAdded {
+		keys = append(keys, fmt.Sprintf("%s_Market_Open", rwaResponse.Symbol))
+		marketOpen := new(big.Float).SetFloat64(0)
+		if rwaResponse.MarketOpen {
+			marketOpen = new(big.Float).SetFloat64(1)
+		}
+		values = append(values, marketOpen)
+
+		keys = append(keys, fmt.Sprintf("%s_Market_Holiday", rwaResponse.Symbol))
+		marketHoliday := new(big.Float).SetFloat64(0)
+		if rwaResponse.MarketHoliday {
+			marketHoliday = new(big.Float).SetFloat64(1)
+		}
+		values = append(values, marketHoliday)
+
+		*marketStatusAdded = true
+	}
+
+	keys = append(keys, rwaResponse.Symbol)
+	values = append(values, new(big.Float).SetFloat64(rwaResponse.Price))
+	return keys, values
 }
 
 func (scraper *RWAWSScraper) updateConfig(filename string, branch string) error {
-	c, err := models.GetRWAConfig(filename, branch)
+	c, err := models.GetRWAWSConfig(filename, branch)
 	if err != nil {
 		return err
 	}
 
-	scraper.stockSymbols = c.Stocks
-	scraper.fxTickers = c.FX
-	scraper.commodities = c.Commodities
-	scraper.etfs = c.ETF
+	oldSymbols := scraper.allSymbols()
 
-	log.Infof("RWAWS - loaded config: stocks=%d fx=%d commodities=%d etf=%d",
-		getNumSymbols(scraper.stockSymbols),
+	scraper.usStocks = c.US_Stocks
+	scraper.hkStocks = c.HK_Stocks
+	scraper.fxTickers = c.FX
+	scraper.crypto = c.Crypto
+	scraper.commodities = c.Commodities
+	scraper.usEtfs = c.US_ETF
+	scraper.deviationThresholds = c.DeviationThresholds
+
+	log.Infof("RWAWS - loaded config: hkstocks=%d usstocks=%d fx=%d crypto=%d commodities=%d usetfs=%d",
+		getNumSymbols(scraper.hkStocks),
+		getNumSymbols(scraper.usStocks),
 		getNumSymbols(scraper.fxTickers),
+		getNumSymbols(scraper.crypto),
 		getNumSymbols(scraper.commodities),
-		getNumSymbols(scraper.etfs),
+		getNumSymbols(scraper.usEtfs),
 	)
 
+	if len(oldSymbols) == 0 {
+		return nil
+	}
+
+	newSymbols := scraper.allSymbols()
+	if !symbolsEqual(oldSymbols, newSymbols) {
+		log.Infof("RWAWS - symbols changed, subscribing to new symbols")
+		if err := scraper.subscribeAll(); err != nil {
+			log.Errorf("RWAWS - failed to subscribe to new symbols: %v", err)
+		}
+	}
+
 	return nil
+}
+
+func symbolsEqual(oldSymbols []string, newSymbols []string) bool {
+	if len(oldSymbols) != len(newSymbols) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(oldSymbols))
+	for _, v := range oldSymbols {
+		seen[v] = struct{}{}
+	}
+	for _, v := range newSymbols {
+		if _, ok := seen[v]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (scraper *RWAWSScraper) allSymbols() []string {
@@ -529,10 +759,12 @@ func (scraper *RWAWSScraper) allSymbols() []string {
 		}
 	}
 
-	appendUnique(scraper.stockSymbols)
+	appendUnique(scraper.hkStocks)
+	appendUnique(scraper.usStocks)
 	appendUnique(scraper.fxTickers)
+	appendUnique(scraper.crypto)
 	appendUnique(scraper.commodities)
-	appendUnique(scraper.etfs)
+	appendUnique(scraper.usEtfs)
 
 	return out
 }
@@ -547,6 +779,13 @@ func (scraper *RWAWSScraper) getStockMarketStatus(msg rwaWSMessage) (bool, bool,
 	if mic == "XHKG" || exchange == "HKEX" {
 		holiday := scraper.isHKHoliday(now)
 		open := scraper.isHKMarketOpen(now)
+		return holiday, open, true
+	}
+
+	// NYSE / NASDAQ
+	if mic == "XNYS" || mic == "XNAS" || mic == "BATS" || exchange == "NYSE" || exchange == "NASDAQ" || exchange == "CBOE" {
+		holiday := scraper.isNYSEHoliday(now)
+		open := scraper.isNYSETradingHours(now)
 		return holiday, open, true
 	}
 
@@ -571,6 +810,28 @@ func (scraper *RWAWSScraper) isHKMarketOpen(now time.Time) bool {
 	inAfternoon := minutes >= 13*60 && minutes < 16*60
 
 	return inMorning || inAfternoon
+}
+
+func (scraper *RWAWSScraper) isNYSEHoliday(now time.Time) bool {
+	nyse := calendar.XNYS()
+	return nyse.IsHoliday(now)
+}
+
+func (scraper *RWAWSScraper) isNYSETradingHours(now time.Time) bool {
+	if scraper.isNYSEHoliday(now) {
+		return false
+	}
+
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		log.Errorf("load America/New_York location: %v", err)
+		return false
+	}
+	now = now.In(loc)
+
+	minutes := now.Hour()*60 + now.Minute()
+	// extended hours: 7:00 AM to 8:00 PM
+	return minutes >= 7*60 && minutes < 20*60
 }
 
 func parseRawFloat(raw json.RawMessage) (float64, error) {
@@ -613,4 +874,50 @@ func chooseName(msg rwaWSMessage) string {
 		return msg.Symbol
 	}
 	return "unknown"
+}
+
+func (scraper *RWAWSScraper) updateOracleMultiValuesForRWAWS(
+	contract diaoraclev3.DIAOracleV3,
+	auth *bind.TransactOpts,
+	keys []string,
+	values []*big.Float,
+	decimals int64) error {
+
+	var cValues []*big.Int
+	var gasPrice *big.Int
+
+	multiplier := new(big.Float).SetInt(
+		new(big.Int).Exp(big.NewInt(10), big.NewInt(decimals), nil),
+	)
+
+	submitTimestamp := time.Now().Unix()
+
+	if submitTimestamp <= scraper.lastSubmittedTs {
+		submitTimestamp = scraper.lastSubmittedTs + 1
+	}
+	scraper.lastSubmittedTs = submitTimestamp
+
+	for i := range keys {
+		scaled := new(big.Float).Mul(values[i], multiplier)
+		scaledInt, _ := scaled.Int(nil)
+
+		cValue := new(big.Int).Lsh(scaledInt, 128)
+		cValue = cValue.Add(cValue, big.NewInt(submitTimestamp))
+		cValues = append(cValues, cValue)
+	}
+
+	tx, err := contract.SetMultipleValues(&bind.TransactOpts{
+		From:     auth.From,
+		Signer:   auth.Signer,
+		GasPrice: gasPrice,
+	}, keys, cValues)
+	if err != nil {
+		return err
+	}
+
+	log.Infof("updater - Gas price: %d.", tx.GasPrice())
+	log.Infof("updater - Nonce: %d.", tx.Nonce())
+	log.Infof("updater - Tx To: %s.", tx.To().String())
+	log.Infof("updater - Tx Hash: 0x%x.", tx.Hash())
+	return nil
 }
