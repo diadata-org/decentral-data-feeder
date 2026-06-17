@@ -40,6 +40,7 @@ type RWAWSQuote struct {
 	Type          dataType  `json:"Type"`
 	MarketHoliday bool      `json:"MarketHoliday"`
 	MarketOpen    bool      `json:"MarketOpen"`
+	AfterMarket   bool      `json:"-"`
 	Exchange      string    `json:"Exchange,omitempty"`
 	MICCode       string    `json:"MICCode,omitempty"`
 	CurrencyBase  string    `json:"CurrencyBase,omitempty"`
@@ -540,16 +541,33 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 }
 
 func (scraper *RWAWSScraper) applyMarketStatus(msg rwaWSMessage, quote *RWAWSQuote) (drop bool) {
-	marketHoliday, marketOpen, knownMarket := scraper.getStockMarketStatus(msg)
-	if knownMarket {
-		quote.MarketHoliday = marketHoliday
-		quote.MarketOpen = marketOpen
-		if !marketOpen {
+	mic := strings.ToUpper(strings.TrimSpace(msg.MICCode))
+	exchange := strings.ToUpper(strings.TrimSpace(msg.Exchange))
+	now := time.Now()
+
+	switch {
+	// HK: keep original behavior, drop when not in regular trading hours
+	case mic == "XHKG" || exchange == "HKEX":
+		quote.MarketHoliday = scraper.isHKHoliday(now)
+		open := scraper.isHKMarketOpen(now)
+		quote.MarketOpen = open
+		if !open {
 			return true
 		}
-	} else {
+
+	// US: label as after market when not in regular trading hours, keep the quote
+	case mic == "XNYS" || mic == "XNAS" || mic == "BATS" ||
+		exchange == "NYSE" || exchange == "NASDAQ" || exchange == "CBOE":
+		quote.MarketHoliday = scraper.isNYSEHoliday(now)
+		open := scraper.isNYSETradingHours(now)
+		quote.MarketOpen = open
+		quote.AfterMarket = !open
+
+	// Unknown market: keep original fallback
+	default:
 		quote.MarketHoliday = false
 		quote.MarketOpen = true
+		quote.AfterMarket = false
 	}
 	return false
 }
@@ -662,6 +680,11 @@ func (scraper *RWAWSScraper) hasPriceDeviatedEnough(symbol string, oldPrice, new
 func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketStatusAdded *bool) (keys []string, values []*big.Float) {
 	log.Info("got rwa ws data: ", rwaResponse)
 
+	symbol := rwaResponse.Symbol
+	if rwaResponse.AfterMarket {
+		symbol = "after_market_" + symbol
+	}
+
 	if (rwaResponse.Type == Equities || rwaResponse.Type == ETF) && !*marketStatusAdded {
 		keys = append(keys, fmt.Sprintf("%s_Market_Open", rwaResponse.Symbol))
 		marketOpen := new(big.Float).SetFloat64(0)
@@ -680,7 +703,7 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketSt
 		*marketStatusAdded = true
 	}
 
-	keys = append(keys, rwaResponse.Symbol)
+	keys = append(keys, symbol)
 	values = append(values, new(big.Float).SetFloat64(rwaResponse.Price))
 	return keys, values
 }
@@ -769,30 +792,6 @@ func (scraper *RWAWSScraper) allSymbols() []string {
 	return out
 }
 
-// Returns (holiday, open, knownMarket)
-func (scraper *RWAWSScraper) getStockMarketStatus(msg rwaWSMessage) (bool, bool, bool) {
-	mic := strings.ToUpper(strings.TrimSpace(msg.MICCode))
-	exchange := strings.ToUpper(strings.TrimSpace(msg.Exchange))
-	now := time.Now()
-
-	// HKEX / XHKG
-	if mic == "XHKG" || exchange == "HKEX" {
-		holiday := scraper.isHKHoliday(now)
-		open := scraper.isHKMarketOpen(now)
-		return holiday, open, true
-	}
-
-	// NYSE / NASDAQ
-	if mic == "XNYS" || mic == "XNAS" || mic == "BATS" || exchange == "NYSE" || exchange == "NASDAQ" || exchange == "CBOE" {
-		holiday := scraper.isNYSEHoliday(now)
-		open := scraper.isNYSETradingHours(now)
-		return holiday, open, true
-	}
-
-	// Unknown market in v1
-	return false, false, false
-}
-
 func (scraper *RWAWSScraper) isHKHoliday(now time.Time) bool {
 	now = now.In(scraper.hkLoc)
 	return !scraper.hkex.IsBusinessDay(now)
@@ -830,8 +829,8 @@ func (scraper *RWAWSScraper) isNYSETradingHours(now time.Time) bool {
 	now = now.In(loc)
 
 	minutes := now.Hour()*60 + now.Minute()
-	// extended hours: 7:00 AM to 8:00 PM
-	return minutes >= 7*60 && minutes < 20*60
+	// regular hours only: 9:30 AM to 4:00 PM
+	return minutes >= 9*60+30 && minutes < 16*60
 }
 
 func parseRawFloat(raw json.RawMessage) (float64, error) {
