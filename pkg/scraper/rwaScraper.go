@@ -682,7 +682,7 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketSt
 
 	symbol := rwaResponse.Symbol
 	if rwaResponse.AfterMarket {
-		symbol = "after_market_" + symbol
+		symbol = "afterMarket:" + symbol
 	}
 
 	if (rwaResponse.Type == Equities || rwaResponse.Type == ETF) && !*marketStatusAdded {
