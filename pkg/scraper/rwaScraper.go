@@ -557,6 +557,8 @@ func (scraper *RWAWSScraper) applyMarketStatus(msg rwaWSMessage, quote *RWAWSQuo
 
 	// US: label as after market when not in regular trading hours, keep the quote
 	case mic == "XNYS" || mic == "XNAS" || mic == "BATS" ||
+		mic == "XNGS" || mic == "XNMS" || mic == "XNCM" || // NASDAQ tiers: Global Select / Global Market / Capital Market
+		mic == "XASE" || mic == "ARCX" || // NYSE American (ex-AMEX) / NYSE Arca (ETFs)
 		exchange == "NYSE" || exchange == "NASDAQ" || exchange == "CBOE":
 		quote.MarketHoliday = scraper.isNYSEHoliday(now)
 		open := scraper.isNYSETradingHours(now)
