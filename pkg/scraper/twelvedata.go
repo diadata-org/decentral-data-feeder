@@ -175,9 +175,10 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			}
 
 			quote, err := getRwaQuoteFromDia(symbol, "Equities")
-			// Fetch data from twelvedata API in case diadata API fails and a twelvedata api key was provided.
-			if err != nil && scraper.apiKey != "" {
-				log.Warn("")
+			// Fetch data from twelvedata API in case diadata API fails or returns an empty quote,
+			// and a twelvedata api key was provided.
+			if (err != nil || quote.Price == 0) && scraper.apiKey != "" {
+				log.Debugf("quote for %s not available in diadata api. Switch to twelvdata api.", symbol)
 				quotation, err := scraper.getTwelveStockPrice(symbol)
 				if err != nil {
 					log.Error("getTwelveStockPrice: ", err)
@@ -189,6 +190,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 				quote.Symbol = symbol
 				quote.Price = price
 				quote.Time = time.Now()
+			} else if err != nil {
+				continue
+			}
+			if quote.Price == 0 {
+				log.Warnf("no valid price for %s from any source. Skip update.", symbol)
+				continue
 			}
 			quote.Source = TWELVEDATA
 			quote.Type = Equities
@@ -210,8 +217,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		}
 
 		quote, err := getRwaQuoteFromDia(ticker, "Fiat")
-		if err != nil && scraper.apiKey != "" {
-			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
+		if (err != nil || quote.Price == 0) && scraper.apiKey != "" {
+			log.Debugf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
 			quotation, err := scraper.getTwelveFXData(ticker)
 			if err != nil {
 				log.Error("getTwelveFXData: ", err)
@@ -220,6 +227,10 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			quote.Price = quotation.Rate
 			quote.Time = time.Unix(quotation.Timestamp, 0)
 		} else if err != nil {
+			continue
+		}
+		if quote.Price == 0 {
+			log.Warnf("no valid price for %s from any source. Skip update.", ticker)
 			continue
 		}
 
@@ -241,8 +252,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		}
 
 		quote, err := getRwaQuoteFromDia(ticker, "Commodities")
-		if err != nil && scraper.apiKey != "" {
-			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
+		if (err != nil || quote.Price == 0) && scraper.apiKey != "" {
+			log.Debugf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
 			quotation, err := scraper.getTwelveQuote(ticker, true)
 			if err != nil {
 				log.Error("getTwelveCommoditiesData: ", err)
@@ -259,6 +270,10 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 				Name:   quotation.Name,
 			}
 		} else if err != nil {
+			continue
+		}
+		if quote.Price == 0 {
+			log.Warnf("no valid price for %s from any source. Skip update.", ticker)
 			continue
 		}
 
@@ -279,8 +294,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		}
 
 		quote, err := getRwaQuoteFromDia(ticker, "ETF")
-		if err != nil && scraper.apiKey != "" {
-			log.Warnf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
+		if (err != nil || quote.Price == 0) && scraper.apiKey != "" {
+			log.Debugf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
 			quotation, err := scraper.getTwelveQuote(ticker, false)
 			if err != nil {
 				log.Error("getTwelveETFData: ", err)
@@ -297,6 +312,10 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 				Time:   time.Unix(quotation.Timestamp, 0),
 			}
 		} else if err != nil {
+			continue
+		}
+		if quote.Price == 0 {
+			log.Warnf("no valid price for %s from any source. Skip update.", ticker)
 			continue
 		}
 
