@@ -140,7 +140,7 @@ func NewRWAWSScraper() *RWAWSScraper {
 		log.Fatal("TWELVEDATA_API_KEY not set")
 	}
 
-	if err := s.updateConfig(RAW_WS_CONFIG); err != nil {
+	if err := s.updateConfig(RAW_WS_CONFIG, ""); err != nil {
 		log.Fatal("Could not load configuration file: ", err)
 	}
 
@@ -213,7 +213,7 @@ func (scraper *RWAWSScraper) mainLoop() {
 			}
 
 		case <-scraper.configTicker.C:
-			if err := scraper.updateConfig(RAW_WS_CONFIG); err != nil {
+			if err := scraper.updateConfig(RAW_WS_CONFIG, ""); err != nil {
 				log.Errorf("RWAWS updateConfig: %v", err)
 			}
 
@@ -490,8 +490,8 @@ func (scraper *RWAWSScraper) publishPendingBatch() {
 	scraper.updateDoneChannel <- true
 }
 
-func (scraper *RWAWSScraper) updateConfig(filename string) error {
-	c, err := models.GetRWAConfig(filename)
+func (scraper *RWAWSScraper) updateConfig(filename string, branch string) error {
+	c, err := models.GetRWAConfig(filename, branch)
 	if err != nil {
 		return err
 	}

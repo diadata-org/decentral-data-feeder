@@ -1,9 +1,10 @@
 {
   "HK_Stocks": ["1211", "0700"],
-  "US_Stocks": ["AMZN", "NVDA", "COIN", "MSTR", "TSLA", "CRCL", "BMNR"],
+  "US_Stocks": ["AMZN", "NVDA", "COIN", "MSTR", "TSLA", "CRCL", "BMNR", "GOOGL", "GOOG", "AAPL", "MSFT", "AVGO", "META", "WMT", "SPCX"],
   "FX": ["EUR/USD", "GBP/USD", "JPY/USD"],
-  "Commodities": ["C_1", "CL1"],
-  "US_ETF": ["IBHG", "IAU", "SPYM", "SIVR", "PPLT", "SPY", "QQQ", "IWM"],
+  "Crypto": ["BTC/USD", "LTC/USD"],
+  "Commodities": ["XAU/USD", "XAG/USD", "NG/USD", "WTI/USD", "C_1", "CL1", "HG1"],
+  "US_ETF": ["IBHG", "IAU", "SPYM", "SIVR", "PPLT", "SPY", "QQQ", "IWM", "SGOV", "QQQM", "ARKK", "VWO"],
   "DeviationThresholds": {
       "IAU": 0.001,
       "SIVR": 0.001,
@@ -14,6 +15,10 @@
       "SPYM": 0.0001,
       "SPY": 0.001,
       "QQQ": 0.001,
-      "IWM": 0.001
+      "IWM": 0.001,
+      "SGOV": 0.001,
+      "QQQM": 0.001,
+      "ARKK": 0.001,
+      "VWO": 0.001
   }
 }
