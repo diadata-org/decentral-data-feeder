@@ -83,8 +83,10 @@ func OracleUpdateExecutor(
 					values = append(values, nyseHoliday)
 				} else {
 					log.Info("got rwa data: ", twelvedataResponse)
-					keys = append(keys, twelvedataResponse.Symbol)
-					values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
+					if twelvedataResponse.Price > 0 {
+						keys = append(keys, twelvedataResponse.Symbol)
+						values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
+					}
 				}
 
 			case scraper.BELO:
@@ -96,8 +98,10 @@ func OracleUpdateExecutor(
 					continue
 				}
 				log.Infof("got belo quote %s -- %v", beloQuote.PairCode, beloQuote.Bid)
-				keys = append(keys, beloQuote.PairCode)
-				values = append(values, utils.ScaleFloat(beloQuote.Bid, decimalsOracleValue))
+				if beloQuote.Bid > 0 {
+					keys = append(keys, beloQuote.PairCode)
+					values = append(values, utils.ScaleFloat(beloQuote.Bid, decimalsOracleValue))
+				}
 
 			case scraper.PARTICULA:
 				tokenRating := make(map[string]int64)
@@ -139,8 +143,10 @@ func OracleUpdateExecutor(
 					values = append(values, marketHoliday)
 				}
 
-				keys = append(keys, rwaResponse.Symbol)
-				values = append(values, utils.ScaleFloat(rwaResponse.Price, decimalsOracleValue))
+				if rwaResponse.Price > 0 {
+					keys = append(keys, rwaResponse.Symbol)
+					values = append(values, utils.ScaleFloat(rwaResponse.Price, decimalsOracleValue))
+				}
 			}
 
 		case <-updateDoneChannel:
