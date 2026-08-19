@@ -103,7 +103,7 @@ func (scraper *XLSDScraper) mainLoop() {
 func (scraper *XLSDScraper) UpdatePrices(url string) error {
 
 	log.Info("update prices for XLSD.............")
-	allTokens, err := getXLSD()
+	allTokens, err := getXLSD(url)
 	if err != nil {
 		return err
 	}
@@ -121,8 +121,8 @@ func (scraper *XLSDScraper) UpdatePrices(url string) error {
 	return nil
 }
 
-func getXLSD() (resp []VToken, err error) {
-	data, _, err := utils.GetRequest(XLSD_URL)
+func getXLSD(url string) (resp []VToken, err error) {
+	data, _, err := utils.GetRequest(url)
 	if err != nil {
 		return
 	}
