@@ -21,6 +21,9 @@ func NewDataScraper(source string) DataScraper {
 		return NewParticulaScraper()
 	case RWAWS:
 		return NewRWAWSScraper()
+	case XLSD:
+		return NewXLSDScraper()
+
 	default:
 		return nil
 	}

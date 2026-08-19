@@ -17,6 +17,10 @@ type BeloConfig struct {
 	Pairs []string `json:"Pairs"`
 }
 
+type XLSDConfig struct {
+	Tokens []string `json:"Tokens"`
+}
+
 func GetRWAConfig(filename string, branch string) (c RWAConfig, err error) {
 
 	data, err := utils.ReadFile(filename, branch)
@@ -30,6 +34,18 @@ func GetRWAConfig(filename string, branch string) (c RWAConfig, err error) {
 }
 
 func GetBeloConfig(filename string, branch string) (c BeloConfig, err error) {
+
+	data, err := utils.ReadFile(filename, branch)
+	if err != nil {
+		return
+	}
+
+	err = json.Unmarshal(data, &c)
+	return
+
+}
+
+func GetXLSDConfig(filename string, branch string) (c XLSDConfig, err error) {
 
 	data, err := utils.ReadFile(filename, branch)
 	if err != nil {

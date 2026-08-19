@@ -13,6 +13,7 @@ const (
 	PARTICULA  = "Particula"
 	BELO       = "Belo"
 	RWAWS      = "RWAWS"
+	XLSD       = "xlsd"
 )
 
 var log *logrus.Logger
@@ -45,6 +46,8 @@ func sourceFromString(s string) (string, bool) {
 		return BELO, true
 	case RWAWS:
 		return RWAWS, true
+	case XLSD:
+		return XLSD, true
 	}
 	return "", false
 }

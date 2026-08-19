@@ -89,6 +89,19 @@ func OracleUpdateExecutor(
 					}
 				}
 
+			case scraper.XLSD:
+				var xlsdQuote scraper.VToken
+				err := json.Unmarshal(data, &xlsdQuote)
+				if err != nil {
+					log.Error("Unmarshal xlsd response: ", err)
+					continue
+				}
+				log.Infof("got xlsd quote %s -- %v", xlsdQuote.Symbol, xlsdQuote.FairPrice)
+				if xlsdQuote.FairPrice > 0 {
+					keys = append(keys, xlsdQuote.Symbol)
+					values = append(values, utils.ScaleFloat(xlsdQuote.FairPrice, decimalsOracleValue))
+				}
+
 			case scraper.BELO:
 
 				var beloQuote scraper.BeloQuote
