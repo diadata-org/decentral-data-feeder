@@ -13,6 +13,16 @@ type RWAConfig struct {
 	ETF         []string `json:"ETF"`
 }
 
+type RWAWSConfig struct {
+	HK_Stocks           []string           `json:"HK_Stocks"`
+	US_Stocks           []string           `json:"US_Stocks"`
+	FX                  []string           `json:"FX"`
+	Crypto              []string           `json:"Crypto"`
+	Commodities         []string           `json:"Commodities"`
+	US_ETF              []string           `json:"US_ETF"`
+	DeviationThresholds map[string]float64 `json:"DeviationThresholds"`
+}
+
 type BeloConfig struct {
 	Pairs []string `json:"Pairs"`
 }
@@ -23,10 +33,17 @@ func GetRWAConfig(filename string, branch string) (c RWAConfig, err error) {
 	if err != nil {
 		return
 	}
-
 	err = json.Unmarshal(data, &c)
 	return
+}
 
+func GetRWAWSConfig(filename string, branch string) (c RWAWSConfig, err error) {
+	data, err := utils.ReadFile(filename, branch)
+	if err != nil {
+		return
+	}
+	err = json.Unmarshal(data, &c)
+	return
 }
 
 func GetBeloConfig(filename string, branch string) (c BeloConfig, err error) {
@@ -35,8 +52,6 @@ func GetBeloConfig(filename string, branch string) (c BeloConfig, err error) {
 	if err != nil {
 		return
 	}
-
 	err = json.Unmarshal(data, &c)
 	return
-
 }
