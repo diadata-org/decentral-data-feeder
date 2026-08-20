@@ -95,6 +95,14 @@ type RWAWSScraper struct {
 	closeOnce sync.Once
 	closed    chan struct{}
 
+	// Symbols the API refused to subscribe, e.g. because the plan has no entitlement for
+	// their exchange. They are excluded from subsequent subscribe calls.
+	blockedMu      sync.Mutex
+	blockedSymbols map[string]struct{}
+
+	// Maximum time to wait for any ws message before considering the connection dead.
+	readTimeout time.Duration
+
 	hkStocks    []string
 	usStocks    []string
 	fxTickers   []string
@@ -154,6 +162,15 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		forcePublishAfterSec = 30
 	}
 
+	// The server echoes a heartbeat event every time we send one (every 10s), so a quiet
+	// connection still produces traffic. Anything longer than a few heartbeats means the
+	// connection is half-open. Set to 0 to disable.
+	readTimeoutSec, err := strconv.Atoi(utils.Getenv("RWA_WS_READ_TIMEOUT_SECONDS", "60"))
+	if err != nil {
+		log.Errorf("parse RWA_WS_READ_TIMEOUT_SECONDS: %v", err)
+		readTimeoutSec = 60
+	}
+
 	rwawsConfigUpdateSeconds, err = strconv.Atoi(utils.Getenv("RWA_WS_CONFIG_UPDATE_SECONDS", "86400"))
 	if err != nil {
 		log.Errorf("parse RWA_WS_CONFIG_UPDATE_SECONDS: %v", err)
@@ -178,6 +195,8 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		lastPublishedTimes:      make(map[string]time.Time),
 		forcePublishAfter:       time.Duration(forcePublishAfterSec) * time.Second,
 		decimals:                decimals,
+		blockedSymbols:          make(map[string]struct{}),
+		readTimeout:             time.Duration(readTimeoutSec) * time.Second,
 	}
 
 	if s.apiKey == "" {
@@ -332,7 +351,10 @@ func (scraper *RWAWSScraper) connectAndSubscribe() error {
 	scraper.conn = conn
 	scraper.connMu.Unlock()
 
-	log.Infof("RWAWS - WebSocket connected to %s", u.String())
+	scraper.applyReadDeadline(conn)
+
+	// u.String() carries the api key, log the endpoint without the query string.
+	log.Infof("RWAWS - WebSocket connected to %s://%s%s", u.Scheme, u.Host, u.Path)
 	return scraper.subscribeAll()
 }
 
@@ -349,10 +371,12 @@ func (scraper *RWAWSScraper) reconnect() error {
 }
 
 func (scraper *RWAWSScraper) handleDisconnect() {
-	const maxRetries = 3
+	const maxBackoff = 60 * time.Second
 	backoff := 2 * time.Second
 
-	for i := 0; i < maxRetries; i++ {
+	// Keep retrying instead of killing the process: the scraper holds the last published
+	// prices and timestamps, which are lost on restart.
+	for attempt := 1; ; attempt++ {
 		select {
 		case <-scraper.ctx.Done():
 			return
@@ -361,28 +385,35 @@ func (scraper *RWAWSScraper) handleDisconnect() {
 		default:
 		}
 
-		log.Warnf("RWAWS - reconnecting... (attempt %d of %d) after %v", i+1, maxRetries, backoff)
+		log.Warnf("RWAWS - reconnecting... (attempt %d) after %v", attempt, backoff)
 		time.Sleep(backoff)
 
 		if err := scraper.reconnect(); err != nil {
-			log.Errorf("RWAWS - reconnect attempt %d failed: %v", i+1, err)
-			if backoff < 60*time.Second {
-				backoff *= 2
+			log.Errorf("RWAWS - reconnect attempt %d failed: %v", attempt, err)
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 			continue
 		}
 
-		log.Infof("RWAWS - reconnect successful on attempt %d", i+1)
+		log.Infof("RWAWS - reconnect successful on attempt %d", attempt)
 		return
 	}
-
-	log.Fatalf("RWAWS - failed to reconnect after %d attempts, giving up", maxRetries)
 }
 
 func (scraper *RWAWSScraper) subscribeAll() error {
 	symbols := scraper.allSymbols()
 	if len(symbols) == 0 {
 		return fmt.Errorf("no symbols configured")
+	}
+
+	symbols = scraper.filterBlocked(symbols)
+	if len(symbols) == 0 {
+		// Every configured symbol was rejected. Re-subscribing or reconnecting cannot fix
+		// that, so stay connected and wait for the next config reload.
+		log.Error("RWAWS - all configured symbols were rejected by the API, nothing left to subscribe")
+		return nil
 	}
 
 	msg := rwaWSSubscribeMessage{
@@ -429,6 +460,8 @@ func (scraper *RWAWSScraper) readMessage() error {
 		return fmt.Errorf("ws connection is nil")
 	}
 
+	scraper.applyReadDeadline(conn)
+
 	_, message, err := conn.ReadMessage()
 	if err != nil {
 		return err
@@ -448,19 +481,15 @@ func (scraper *RWAWSScraper) readMessage() error {
 		log.Infof("RWAWS - subscribe-status: status=%s code=%d msg=%s success=%v fails=%v",
 			msg.Status, msg.Code, msg.Message, msg.Success, msg.Fails)
 
-		if msg.Fails != nil {
-			switch v := msg.Fails.(type) {
-			case []interface{}:
-				if len(v) > 0 {
-					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
-					scraper.handleDisconnect()
-				}
-			case map[string]interface{}:
-				if len(v) > 0 {
-					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
-					scraper.handleDisconnect()
-				}
-			}
+		// Do not reconnect here. These failures are permanent for the current plan, e.g.
+		// "You are not authorized to access XHKG data". A reconnect re-sends the same
+		// symbol list, gets the same failures and reconnects again, which tears the
+		// connection down every couple of seconds and starves the price stream. Drop the
+		// rejected symbols instead and keep serving the ones that did subscribe.
+		if failed := extractFailedSymbols(msg.Fails); len(failed) > 0 {
+			scraper.blockSymbols(failed)
+			log.Errorf("RWAWS - subscribe rejected %d symbols: %v - dropped from the subscription, connection kept alive",
+				len(failed), failed)
 		}
 		return nil
 	case "price":
@@ -742,6 +771,9 @@ func (scraper *RWAWSScraper) updateConfig(filename string, branch string) error 
 	newSymbols := scraper.allSymbols()
 	if !symbolsEqual(oldSymbols, newSymbols) {
 		log.Infof("RWAWS - symbols changed, subscribing to new symbols")
+		// Entitlements may have changed along with the config, so give previously
+		// rejected symbols another chance.
+		scraper.clearBlockedSymbols()
 		if err := scraper.subscribeAll(); err != nil {
 			log.Errorf("RWAWS - failed to subscribe to new symbols: %v", err)
 		}
@@ -791,6 +823,99 @@ func (scraper *RWAWSScraper) allSymbols() []string {
 	appendUnique(scraper.commodities)
 	appendUnique(scraper.usEtfs)
 
+	return out
+}
+
+// applyReadDeadline bounds how long a read may block. Without it a half-open connection
+// leaves ReadMessage blocked forever, so no error is ever returned and the scraper never
+// reconnects.
+func (scraper *RWAWSScraper) applyReadDeadline(conn *ws.Conn) {
+	if conn == nil {
+		return
+	}
+	if scraper.readTimeout <= 0 {
+		_ = conn.SetReadDeadline(time.Time{})
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(scraper.readTimeout))
+}
+
+func (scraper *RWAWSScraper) blockSymbols(symbols []string) {
+	scraper.blockedMu.Lock()
+	defer scraper.blockedMu.Unlock()
+
+	if scraper.blockedSymbols == nil {
+		scraper.blockedSymbols = make(map[string]struct{})
+	}
+	for _, s := range symbols {
+		scraper.blockedSymbols[s] = struct{}{}
+	}
+}
+
+func (scraper *RWAWSScraper) clearBlockedSymbols() {
+	scraper.blockedMu.Lock()
+	defer scraper.blockedMu.Unlock()
+
+	if len(scraper.blockedSymbols) == 0 {
+		return
+	}
+	log.Infof("RWAWS - clearing %d previously rejected symbols, they will be retried", len(scraper.blockedSymbols))
+	scraper.blockedSymbols = make(map[string]struct{})
+}
+
+func (scraper *RWAWSScraper) filterBlocked(symbols []string) []string {
+	scraper.blockedMu.Lock()
+	defer scraper.blockedMu.Unlock()
+
+	if len(scraper.blockedSymbols) == 0 {
+		return symbols
+	}
+
+	out := make([]string, 0, len(symbols))
+	for _, s := range symbols {
+		if _, blocked := scraper.blockedSymbols[s]; blocked {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// extractFailedSymbols pulls the symbol names out of the "fails" field of a
+// subscribe-status message. The API returns a list of objects such as
+// [{"symbol":"0700","message":"You are not authorized to access XHKG data..."}].
+func extractFailedSymbols(fails interface{}) []string {
+	symbolOf := func(item interface{}) string {
+		switch v := item.(type) {
+		case string:
+			return strings.TrimSpace(v)
+		case map[string]interface{}:
+			if sym, ok := v["symbol"].(string); ok {
+				return strings.TrimSpace(sym)
+			}
+		}
+		return ""
+	}
+
+	var out []string
+	switch v := fails.(type) {
+	case []interface{}:
+		for _, item := range v {
+			if sym := symbolOf(item); sym != "" {
+				out = append(out, sym)
+			}
+		}
+	case map[string]interface{}:
+		for key, item := range v {
+			if sym := symbolOf(item); sym != "" {
+				out = append(out, sym)
+				continue
+			}
+			if key = strings.TrimSpace(key); key != "" {
+				out = append(out, key)
+			}
+		}
+	}
 	return out
 }
 
