@@ -95,6 +95,9 @@ type RWAWSScraper struct {
 	closeOnce sync.Once
 	closed    chan struct{}
 
+	// Maximum time to wait for any ws message before considering the connection dead.
+	readTimeout time.Duration
+
 	hkStocks    []string
 	usStocks    []string
 	fxTickers   []string
@@ -154,6 +157,21 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		forcePublishAfterSec = 30
 	}
 
+	// A dead connection does not always announce itself: if the peer or a load balancer
+	// drops it without sending FIN, ReadMessage() blocks forever, never returns an error,
+	// and the scraper never reconnects. It just goes quiet, with nothing in the logs and
+	// the process still looking healthy. A read deadline turns that into an i/o timeout,
+	// which the read loop already handles by reconnecting.
+	//
+	// 60s is safe because we send a heartbeat every 10s and the server echoes it, so a
+	// healthy connection is never silent for that long, even with the markets closed.
+	// Set RWA_WS_READ_TIMEOUT_SECONDS=0 to go back to blocking indefinitely.
+	readTimeoutSec, err := strconv.Atoi(utils.Getenv("RWA_WS_READ_TIMEOUT_SECONDS", "60"))
+	if err != nil {
+		log.Errorf("parse RWA_WS_READ_TIMEOUT_SECONDS: %v", err)
+		readTimeoutSec = 60
+	}
+
 	rwawsConfigUpdateSeconds, err = strconv.Atoi(utils.Getenv("RWA_WS_CONFIG_UPDATE_SECONDS", "86400"))
 	if err != nil {
 		log.Errorf("parse RWA_WS_CONFIG_UPDATE_SECONDS: %v", err)
@@ -178,6 +196,7 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		lastPublishedTimes:      make(map[string]time.Time),
 		forcePublishAfter:       time.Duration(forcePublishAfterSec) * time.Second,
 		decimals:                decimals,
+		readTimeout:             time.Duration(readTimeoutSec) * time.Second,
 	}
 
 	if s.apiKey == "" {
@@ -332,7 +351,10 @@ func (scraper *RWAWSScraper) connectAndSubscribe() error {
 	scraper.conn = conn
 	scraper.connMu.Unlock()
 
-	log.Infof("RWAWS - WebSocket connected to %s", u.String())
+	scraper.applyReadDeadline(conn)
+
+	// u.String() carries the api key, log the endpoint without the query string.
+	log.Infof("RWAWS - WebSocket connected to %s://%s%s", u.Scheme, u.Host, u.Path)
 	return scraper.subscribeAll()
 }
 
@@ -349,10 +371,12 @@ func (scraper *RWAWSScraper) reconnect() error {
 }
 
 func (scraper *RWAWSScraper) handleDisconnect() {
-	const maxRetries = 3
+	const maxBackoff = 60 * time.Second
 	backoff := 2 * time.Second
 
-	for i := 0; i < maxRetries; i++ {
+	// Keep retrying instead of killing the process: the scraper holds the last published
+	// prices and timestamps, which are lost on restart.
+	for attempt := 1; ; attempt++ {
 		select {
 		case <-scraper.ctx.Done():
 			return
@@ -361,22 +385,21 @@ func (scraper *RWAWSScraper) handleDisconnect() {
 		default:
 		}
 
-		log.Warnf("RWAWS - reconnecting... (attempt %d of %d) after %v", i+1, maxRetries, backoff)
+		log.Warnf("RWAWS - reconnecting... (attempt %d) after %v", attempt, backoff)
 		time.Sleep(backoff)
 
 		if err := scraper.reconnect(); err != nil {
-			log.Errorf("RWAWS - reconnect attempt %d failed: %v", i+1, err)
-			if backoff < 60*time.Second {
-				backoff *= 2
+			log.Errorf("RWAWS - reconnect attempt %d failed: %v", attempt, err)
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 			continue
 		}
 
-		log.Infof("RWAWS - reconnect successful on attempt %d", i+1)
+		log.Infof("RWAWS - reconnect successful on attempt %d", attempt)
 		return
 	}
-
-	log.Fatalf("RWAWS - failed to reconnect after %d attempts, giving up", maxRetries)
 }
 
 func (scraper *RWAWSScraper) subscribeAll() error {
@@ -429,6 +452,8 @@ func (scraper *RWAWSScraper) readMessage() error {
 		return fmt.Errorf("ws connection is nil")
 	}
 
+	scraper.applyReadDeadline(conn)
+
 	_, message, err := conn.ReadMessage()
 	if err != nil {
 		return err
@@ -448,17 +473,20 @@ func (scraper *RWAWSScraper) readMessage() error {
 		log.Infof("RWAWS - subscribe-status: status=%s code=%d msg=%s success=%v fails=%v",
 			msg.Status, msg.Code, msg.Message, msg.Success, msg.Fails)
 
+		// Do not reconnect here. These rejections are permanent for the current plan, e.g.
+		// "You are not authorized to access XHKG data". A reconnect re-sends the same
+		// symbol list, gets the same rejection and reconnects again, tearing the
+		// connection down every couple of seconds and starving the price stream. Keep the
+		// connection and serve the symbols that did subscribe.
 		if msg.Fails != nil {
 			switch v := msg.Fails.(type) {
 			case []interface{}:
 				if len(v) > 0 {
-					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
-					scraper.handleDisconnect()
+					log.Errorf("RWAWS - subscribe rejected %d symbols: %v - connection kept alive", len(v), v)
 				}
 			case map[string]interface{}:
 				if len(v) > 0 {
-					log.Errorf("RWAWS - subscribe partially failed, %d symbols failed: %v - will reconnect", len(v), v)
-					scraper.handleDisconnect()
+					log.Errorf("RWAWS - subscribe rejected %d symbols: %v - connection kept alive", len(v), v)
 				}
 			}
 		}
@@ -792,6 +820,20 @@ func (scraper *RWAWSScraper) allSymbols() []string {
 	appendUnique(scraper.usEtfs)
 
 	return out
+}
+
+// applyReadDeadline bounds how long a read may block. Without it a half-open connection
+// leaves ReadMessage blocked forever, so no error is ever returned and the scraper never
+// reconnects.
+func (scraper *RWAWSScraper) applyReadDeadline(conn *ws.Conn) {
+	if conn == nil {
+		return
+	}
+	if scraper.readTimeout <= 0 {
+		_ = conn.SetReadDeadline(time.Time{})
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(scraper.readTimeout))
 }
 
 func (scraper *RWAWSScraper) isHKHoliday(now time.Time) bool {
