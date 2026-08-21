@@ -53,6 +53,9 @@ func main() {
 				handleBelo(deployedContract, conn, auth, chainID, source, decimalsOracleValue)
 			case scraper.RWAWS:
 				handleRWAWS(deployedContract, conn, auth, chainId, source, decimalsOracleValue)
+			case scraper.XLSD:
+				handleXLSD(deployedContract, conn, auth, chainID, source, decimalsOracleValue)
+
 			}
 
 		}(source, deployedContract, conn, chainId, privateKey, auth)
@@ -82,6 +85,16 @@ func handleBelo(deployedContract string, conn *ethclient.Client, auth *bind.Tran
 
 func handleParticula(deployedContract string, conn *ethclient.Client, auth *bind.TransactOpts, chainId int64, source string, decimalsOracleValue int) {
 	DS := scraper.NewDataScraper(scraper.PARTICULA)
+	var contract diaoraclev3.DIAOracleV3
+	c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
+	if err != nil {
+		log.Fatalf("Failed to Deploy or Bind primary and backup contract: %v", err)
+	}
+	onchain.OracleUpdateExecutor(auth, c, chainId, source, decimalsOracleValue, DS.DataChannel(), DS.UpdateDoneChannel())
+}
+
+func handleXLSD(deployedContract string, conn *ethclient.Client, auth *bind.TransactOpts, chainId int64, source string, decimalsOracleValue int) {
+	DS := scraper.NewDataScraper(scraper.XLSD)
 	var contract diaoraclev3.DIAOracleV3
 	c, err := onchain.DeployOrBindContract(deployedContract, conn, auth, contract)
 	if err != nil {

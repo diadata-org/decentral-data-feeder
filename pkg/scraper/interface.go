@@ -19,6 +19,9 @@ func NewDataScraper(source string) DataScraper {
 		return NewBeloScraper()
 	case PARTICULA:
 		return NewParticulaScraper()
+	case XLSD:
+		return NewXLSDScraper()
+
 	default:
 		return nil
 	}
