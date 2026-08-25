@@ -87,6 +87,8 @@ type RWAWSScraper struct {
 
 	apiKey string
 	wsURL  string
+	// Branch to read the market config from.
+	branchMarketConfig string
 
 	conn    *ws.Conn
 	connMu  sync.RWMutex
@@ -183,6 +185,7 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		cancel:              cancel,
 		apiKey:              utils.Getenv("TWELVEDATA_API_KEY", ""),
 		wsURL:               utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
+		branchMarketConfig:  utils.Getenv("RWA_WS_BRANCH_MARKET_CONFIG", ""),
 		closed:              make(chan struct{}),
 		pendingQuotes:       make(map[string]RWAWSQuote),
 		publishCooldown:     time.Duration(publishIntervalMs) * time.Millisecond,
@@ -203,7 +206,7 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 		log.Fatal("TWELVEDATA_API_KEY not set")
 	}
 
-	if err := s.updateConfig(RAW_WS_CONFIG, ""); err != nil {
+	if err := s.updateConfig(RAW_WS_CONFIG); err != nil {
 		log.Fatal("Could not load configuration file: ", err)
 	}
 
@@ -275,7 +278,7 @@ func (scraper *RWAWSScraper) mainLoop() {
 		case <-scraper.closed:
 			return
 		case <-scraper.configTicker.C:
-			if err := scraper.updateConfig(RAW_WS_CONFIG, "new_branch_rwa"); err != nil {
+			if err := scraper.updateConfig(RAW_WS_CONFIG); err != nil {
 				log.Errorf("RWAWS updateConfig: %v", err)
 			}
 
@@ -743,8 +746,8 @@ func (scraper *RWAWSScraper) preparePublishData(rwaResponse RWAWSQuote, marketSt
 	return keys, values
 }
 
-func (scraper *RWAWSScraper) updateConfig(filename string, branch string) error {
-	c, err := models.GetRWAWSConfig(filename, branch)
+func (scraper *RWAWSScraper) updateConfig(filename string) error {
+	c, err := models.GetRWAWSConfig(filename, scraper.branchMarketConfig)
 	if err != nil {
 		return err
 	}
