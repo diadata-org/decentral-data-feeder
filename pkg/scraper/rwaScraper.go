@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	RAW_WS_CONFIG = "rawWSConfig.json"
-	rwaWSURL      = "wss://ws.twelvedata.com/v1/quotes/price"
-	Crypto dataType = "Crypto"
+	RAW_WS_CONFIG          = "rawWSConfig.json"
+	rwaWSURL               = "wss://ws.twelvedata.com/v1/quotes/price"
+	Crypto        dataType = "Crypto"
 )
 
 var (
@@ -101,7 +101,7 @@ type RWAWSScraper struct {
 	hkStocks    []string
 	usStocks    []string
 	fxTickers   []string
-	crypto []string
+	crypto      []string
 	commodities []string
 	usEtfs      []string
 
@@ -129,7 +129,7 @@ type RWAWSScraper struct {
 	lastPublishedTimes  map[string]time.Time
 	forcePublishAfter   time.Duration
 
-	decimals int64
+	decimals            int64
 	deviationThresholds map[string]float64
 
 	publishTrigger chan struct{}
@@ -179,24 +179,24 @@ func NewRWAWSScraper(auth *bind.TransactOpts, contractAny any, chainId int64, so
 	}
 
 	s := &RWAWSScraper{
-		ctx:                     ctx,
-		cancel:                  cancel,
-		apiKey:                  utils.Getenv("TWELVEDATA_API_KEY", ""),
-		wsURL:                   utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
-		closed:                  make(chan struct{}),
-		pendingQuotes:           make(map[string]RWAWSQuote),
-		publishCooldown:         time.Duration(publishIntervalMs) * time.Millisecond,
-		hkLoc:                   hkLoc,
-		hkex:                    calendar.XHKG(),
-		auth:                    auth,
-		contractAny:             contractAny,
-		chainId:                 chainId,
-		source:                  source,
-		lastPublishedPrices:     make(map[string]float64),
-		lastPublishedTimes:      make(map[string]time.Time),
-		forcePublishAfter:       time.Duration(forcePublishAfterSec) * time.Second,
-		decimals:                decimals,
-		readTimeout:             time.Duration(readTimeoutSec) * time.Second,
+		ctx:                 ctx,
+		cancel:              cancel,
+		apiKey:              utils.Getenv("TWELVEDATA_API_KEY", ""),
+		wsURL:               utils.Getenv("TWELVEDATA_WS_URL", rwaWSURL),
+		closed:              make(chan struct{}),
+		pendingQuotes:       make(map[string]RWAWSQuote),
+		publishCooldown:     time.Duration(publishIntervalMs) * time.Millisecond,
+		hkLoc:               hkLoc,
+		hkex:                calendar.XHKG(),
+		auth:                auth,
+		contractAny:         contractAny,
+		chainId:             chainId,
+		source:              source,
+		lastPublishedPrices: make(map[string]float64),
+		lastPublishedTimes:  make(map[string]time.Time),
+		forcePublishAfter:   time.Duration(forcePublishAfterSec) * time.Second,
+		decimals:            decimals,
+		readTimeout:         time.Duration(readTimeoutSec) * time.Second,
 	}
 
 	if s.apiKey == "" {
@@ -296,23 +296,23 @@ func (scraper *RWAWSScraper) mainLoop() {
 }
 
 func (scraper *RWAWSScraper) publishLoop() {
-    for {
-        select {
-        case <-scraper.ctx.Done():
-            return
-        case <-scraper.closed:
-            return
-        case <-scraper.publishTrigger:
-            scraper.publishPendingBatch()
-        }
-    }
+	for {
+		select {
+		case <-scraper.ctx.Done():
+			return
+		case <-scraper.closed:
+			return
+		case <-scraper.publishTrigger:
+			scraper.publishPendingBatch()
+		}
+	}
 }
 
 func (scraper *RWAWSScraper) triggerPublish() {
-    select {
-    case scraper.publishTrigger <- struct{}{}:
-    default:
-    }
+	select {
+	case scraper.publishTrigger <- struct{}{}:
+	default:
+	}
 }
 
 func (scraper *RWAWSScraper) publishData(keys []string, values []*big.Float) {
@@ -502,6 +502,11 @@ func (scraper *RWAWSScraper) handlePriceMessage(msg rwaWSMessage) error {
 	price, err := parseRawFloat(msg.Price)
 	if err != nil {
 		return err
+	}
+
+	if price <= 0 {
+		log.Warnf("RWAWS - dropping quote for %s: non-positive price %v", msg.Symbol, price)
+		return nil
 	}
 
 	quoteTime, validTs := parseTimestamp(msg.Timestamp)
