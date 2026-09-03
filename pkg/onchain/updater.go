@@ -209,6 +209,7 @@ func updateOracleMultiValues(
 		}
 	} else {
 		log.Infof("updater - Subsequent run: processing all %d items in single transaction", totalItems)
+		time.Sleep(2 * time.Second)
 
 		tx, err := contract.SetMultipleValues(&bind.TransactOpts{
 			From:     auth.From,
