@@ -56,7 +56,7 @@ func NewXLSDScraper() *XLSDScraper {
 	dataFreshnessSeconds, err := strconv.Atoi(utils.Getenv("XLSD_DATA_FRESHNESS_SECONDS", "60"))
 	if err != nil {
 		log.Errorf("parse XLSD_DATA_FRESHNESS_SECONDS: %v", err)
-		configUpdateSeconds = 60
+		dataFreshnessSeconds = 60
 	}
 
 	scraper := &XLSDScraper{
