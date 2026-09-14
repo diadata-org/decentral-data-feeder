@@ -72,6 +72,7 @@ type TwelvedataScraper struct {
 	commodities        []string
 	eTFs               []string
 	apiKey             string
+	dataFreshness      time.Duration
 }
 
 func NewTwelvedataScraper() *TwelvedataScraper {
@@ -84,12 +85,18 @@ func NewTwelvedataScraper() *TwelvedataScraper {
 		log.Errorf("parse TWELVEDATA_CONFIG_UPDATE_SECONDS: %v", err)
 		configUpdateSeconds = 86400
 	}
+	dataFreshnessSeconds, err := strconv.Atoi(utils.Getenv("TWELVEDATA_DATA_FRESHNESS_SECONDS", "160"))
+	if err != nil {
+		log.Errorf("parse TWELVEDATA_DATA_FRESHNESS_SECONDS: %v", err)
+		dataFreshnessSeconds = 160
+	}
 
 	s := &TwelvedataScraper{
 		updateTicker:       time.NewTicker(time.Duration(updateSeconds) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
 		apiKey:             utils.Getenv("TWELVEDATA_API_KEY", ""),
 		branchMarketConfig: utils.Getenv("TWELVEDATA_BRANCH_MARKET_CONFIG", ""),
+		dataFreshness:      time.Duration(dataFreshnessSeconds) * time.Second,
 	}
 	err = s.updateConfig(TWELVEDATA_CONFIG_PATH)
 	if err != nil {
@@ -200,6 +207,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			quote.Source = TWELVEDATA
 			quote.Type = Equities
 
+			fresh, over := utils.CheckFreshness(quote.Time, scraper.dataFreshness)
+			if !fresh {
+				log.Warnf("token %s timestamp is %v too old", quote.Symbol, over)
+				continue
+			}
+
 			quoteBytes, err := json.Marshal(quote)
 			if err != nil {
 				log.Error("marshal stock data: ", err)
@@ -236,6 +249,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 		quote.Source = TWELVEDATA
 		quote.Type = Fiat
+
+		fresh, over := utils.CheckFreshness(quote.Time, scraper.dataFreshness)
+		if !fresh {
+			log.Warnf("token %s timestamp is %v too old", quote.Symbol, over)
+			continue
+		}
 
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
@@ -280,6 +299,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		quote.Source = TWELVEDATA
 		quote.Type = Commodities
 
+		fresh, over := utils.CheckFreshness(quote.Time, scraper.dataFreshness)
+		if !fresh {
+			log.Warnf("token %s timestamp is %v too old", quote.Symbol, over)
+			continue
+		}
+
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
 			log.Error("marshal commodities data: ", err)
@@ -316,6 +341,12 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 		}
 		if quote.Price == 0 {
 			log.Warnf("no valid price for %s from any source. Skip update.", ticker)
+			continue
+		}
+
+		fresh, over := utils.CheckFreshness(quote.Time, scraper.dataFreshness)
+		if !fresh {
+			log.Warnf("token %s timestamp is %v too old", quote.Symbol, over)
 			continue
 		}
 
