@@ -1,0 +1,4 @@
+{
+    "Prices": ["silvercoin/latest/CHF", "silvercoin/latest/USD", "silvercoin/latest/EUR", "goldcoin/latest/CHF", "goldcoin/latest/USD", "goldcoin/latest/EUR"],
+    "Reserves": ["goldcoins", "silvercoins"]
+}

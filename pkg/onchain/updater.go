@@ -102,6 +102,19 @@ func OracleUpdateExecutor(
 					values = append(values, utils.ScaleFloat(xlsdQuote.FairPrice, decimalsOracleValue))
 				}
 
+			case scraper.DENARIO:
+				var denarioQuote scraper.DenarioQuote
+				err := json.Unmarshal(data, &denarioQuote)
+				if err != nil {
+					log.Error("Unmarshal denario response: ", err)
+					continue
+				}
+				log.Infof("got denario %s %s -- %v", denarioQuote.Type, denarioQuote.Key, denarioQuote.Value)
+				if denarioQuote.Value > 0 {
+					keys = append(keys, denarioQuote.Key)
+					values = append(values, utils.ScaleFloat(denarioQuote.Value, decimalsOracleValue))
+				}
+
 			case scraper.BELO:
 
 				var beloQuote scraper.BeloQuote
