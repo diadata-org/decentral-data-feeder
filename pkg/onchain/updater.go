@@ -109,7 +109,7 @@ func OracleUpdateExecutor(
 					log.Error("Unmarshal denario response: ", err)
 					continue
 				}
-				log.Infof("got denario %s %s -- %v", denarioQuote.Type, denarioQuote.Key, denarioQuote.Value)
+				log.Infof("got denario %s %s -- %v -- %s", denarioQuote.Type, denarioQuote.Key, denarioQuote.Value, denarioQuote.Time.Format(time.RFC3339))
 				if denarioQuote.Value > 0 {
 					keys = append(keys, denarioQuote.Key)
 					values = append(values, utils.ScaleFloat(denarioQuote.Value, decimalsOracleValue))

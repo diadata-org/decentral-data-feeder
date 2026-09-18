@@ -19,8 +19,10 @@ const (
 	DENARIO_RESERVE_URL = "https://reserve.denario.swiss/api"
 	DENARIO_CONFIG_PATH = "denario.json"
 
-	DENARIO_PRICE_FIELD   = "priceAsk"
-	DENARIO_RESERVE_FIELD = "amountOunces"
+	DENARIO_PRICE_FIELD        = "priceAsk"
+	DENARIO_PRICE_TIME_FIELD   = "priceDate"
+	DENARIO_RESERVE_FIELD      = "amountOunces"
+	DENARIO_RESERVE_TIME_FIELD = "date"
 
 	denarioRequestTimeout = 10 * time.Second
 
@@ -29,9 +31,10 @@ const (
 )
 
 type DenarioQuote struct {
-	Key   string   `json:"Key"`
-	Value float64  `json:"Value"`
-	Type  dataType `json:"Type"`
+	Key   string    `json:"Key"`
+	Value float64   `json:"Value"`
+	Time  time.Time `json:"Time"`
+	Type  dataType  `json:"Type"`
 }
 
 type DenarioScraper struct {
@@ -45,6 +48,7 @@ type DenarioScraper struct {
 	updateTicker       *time.Ticker
 	configUpdateTicker *time.Ticker
 	branchMarketConfig string
+	maxValueAge        time.Duration
 	dataChannel        chan []byte
 	updateDoneChannel  chan bool
 }
@@ -60,6 +64,11 @@ func NewDenarioScraper() *DenarioScraper {
 		log.Errorf("parse DENARIO_CONFIG_UPDATE_SECONDS: %v", err)
 		configUpdateSeconds = 86400
 	}
+	maxValueAgeSeconds, err := strconv.ParseInt(utils.Getenv("DENARIO_MAX_VALUE_AGE_SECONDS", "0"), 10, 64)
+	if err != nil {
+		log.Errorf("parse DENARIO_MAX_VALUE_AGE_SECONDS: %v", err)
+		maxValueAgeSeconds = 0
+	}
 
 	scraper := &DenarioScraper{
 		priceURL:           DENARIO_PRICE_URL,
@@ -69,6 +78,7 @@ func NewDenarioScraper() *DenarioScraper {
 		updateTicker:       time.NewTicker(time.Duration(updateSecs) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
 		branchMarketConfig: utils.Getenv("DENARIO_BRANCH_MARKET_CONFIG", ""),
+		maxValueAge:        time.Duration(maxValueAgeSeconds) * time.Second,
 	}
 	scraper.dataChannel = make(chan []byte)
 	scraper.updateDoneChannel = make(chan bool)
@@ -124,23 +134,27 @@ func (scraper *DenarioScraper) UpdateValues() error {
 	log.Info("update values for Denario.............")
 	prices, reserves := scraper.getAssets()
 
-	sent := scraper.sendValues(scraper.priceURL, prices, DENARIO_PRICE_FIELD, DenarioPrice)
-	sent += scraper.sendValues(scraper.reserveURL, reserves, DENARIO_RESERVE_FIELD, DenarioReserve)
+	sent := scraper.sendValues(scraper.priceURL, prices, DENARIO_PRICE_FIELD, DENARIO_PRICE_TIME_FIELD, DenarioPrice)
+	sent += scraper.sendValues(scraper.reserveURL, reserves, DENARIO_RESERVE_FIELD, DENARIO_RESERVE_TIME_FIELD, DenarioReserve)
 	if sent == 0 {
 		return fmt.Errorf("no values for %d prices and %d reserves", len(prices), len(reserves))
 	}
 	return nil
 }
 
-func (scraper *DenarioScraper) sendValues(baseURL string, assets []string, field string, t dataType) (sent int) {
+func (scraper *DenarioScraper) sendValues(baseURL string, assets []string, field, timeField string, t dataType) (sent int) {
 	for _, asset := range assets {
-		value, err := scraper.getValue(baseURL+"/"+asset, field)
+		value, valueTime, err := scraper.getValue(baseURL+"/"+asset, field, timeField)
 		if err != nil {
 			log.Errorf("get Denario %s for %s: %v", field, asset, err)
 			continue
 		}
+		if age := time.Since(valueTime); scraper.maxValueAge > 0 && !valueTime.IsZero() && age > scraper.maxValueAge {
+			log.Warnf("skip %s: %s %v is %v old", asset, timeField, valueTime.Format(time.RFC3339), age.Truncate(time.Second))
+			continue
+		}
 
-		b, err := json.Marshal(DenarioQuote{Key: asset, Value: value, Type: t})
+		b, err := json.Marshal(DenarioQuote{Key: asset, Value: value, Time: valueTime, Type: t})
 		if err != nil {
 			log.Error("marshal Denario data: ", err)
 			continue
@@ -151,36 +165,48 @@ func (scraper *DenarioScraper) sendValues(baseURL string, assets []string, field
 	return
 }
 
-func (scraper *DenarioScraper) getValue(url string, field string) (float64, error) {
+func (scraper *DenarioScraper) getValue(url string, field, timeField string) (float64, time.Time, error) {
+	var valueTime time.Time
+
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return 0, err
+		return 0, valueTime, err
 	}
 	req.Header.Set("X-AUTH-TOKEN", scraper.authKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := scraper.httpClient.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, valueTime, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return 0, valueTime, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("HTTP Response Error %d: %s", resp.StatusCode, body)
+		return 0, valueTime, fmt.Errorf("HTTP Response Error %d: %s", resp.StatusCode, body)
 	}
 
 	result := gjson.GetBytes(body, field)
 	if !result.Exists() {
-		return 0, fmt.Errorf("no %s in response: %s", field, body)
+		return 0, valueTime, fmt.Errorf("no %s in response: %s", field, body)
 	}
 	if result.Float() <= 0 {
-		return 0, fmt.Errorf("non-positive %s: %s", field, result.Raw)
+		return 0, valueTime, fmt.Errorf("non-positive %s: %s", field, result.Raw)
 	}
-	return result.Float(), nil
+
+	// A missing or unparsable time does not invalidate the value itself.
+	if rawTime := gjson.GetBytes(body, timeField); !rawTime.Exists() {
+		log.Warnf("no %s in Denario response: %s", timeField, body)
+	} else if parsed, errTime := time.Parse(time.RFC3339, rawTime.String()); errTime != nil {
+		log.Warnf("parse Denario %s %q: %v", timeField, rawTime.String(), errTime)
+	} else {
+		valueTime = parsed
+	}
+
+	return result.Float(), valueTime, nil
 }
 
 func (scraper *DenarioScraper) updateConfig(filePath string) error {

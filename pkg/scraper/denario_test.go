@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/models"
 )
@@ -61,6 +63,15 @@ func sentDenarioQuotes(t *testing.T, scraper *DenarioScraper) map[string]Denario
 	return quotes
 }
 
+func denarioTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("parse %s: %v", value, err)
+	}
+	return parsed
+}
+
 func readDenarioConfigFile(t *testing.T) models.DenarioConfig {
 	t.Helper()
 	raw, err := os.ReadFile("../../config/rwa/denario.json")
@@ -78,13 +89,11 @@ func readDenarioConfigFile(t *testing.T) models.DenarioConfig {
 	return c
 }
 
-// Prices are the ask price and reserves the amount in ounces, the values the
-// Denario oracles on Nexus publish. The asset path is the oracle key.
 func TestDenarioUpdateValuesSendsPricesAndReserves(t *testing.T) {
 	server := fakeDenarioAPI(t, map[string]string{
-		"/price/goldcoin/latest/CHF":   `{"priceAsk": 3120.55, "priceBid": 3010.1}`,
-		"/price/silvercoin/latest/USD": `{"priceAsk": "41.2", "priceBid": "38.9"}`,
-		"/reserve/goldcoins":           `{"amountOunces": 1520.25}`,
+		"/price/goldcoin/latest/CHF":   `{"priceAsk":"3796.19812","priceBid":"3644.35019","currency":"CHF","priceDate":"2026-09-18T04:34:02+02:00"}`,
+		"/price/silvercoin/latest/USD": `{"priceAsk":"74.3732","priceBid":"71.1","currency":"USD","priceDate":"2026-09-18T04:34:05+02:00"}`,
+		"/reserve/goldcoins":           `{"date":"2026-09-18T04:34:29+02:00","amountOunces":"46.30234"}`,
 	})
 	scraper := testDenarioScraper(server, testDenarioAuthKey,
 		[]string{"goldcoin/latest/CHF", "silvercoin/latest/USD"},
@@ -96,18 +105,70 @@ func TestDenarioUpdateValuesSendsPricesAndReserves(t *testing.T) {
 	}
 
 	want := []DenarioQuote{
-		{Key: "goldcoin/latest/CHF", Value: 3120.55, Type: DenarioPrice},
-		{Key: "silvercoin/latest/USD", Value: 41.2, Type: DenarioPrice},
-		{Key: "goldcoins", Value: 1520.25, Type: DenarioReserve},
+		{Key: "goldcoin/latest/CHF", Value: 3796.19812, Time: denarioTime(t, "2026-09-18T04:34:02+02:00"), Type: DenarioPrice},
+		{Key: "silvercoin/latest/USD", Value: 74.3732, Time: denarioTime(t, "2026-09-18T04:34:05+02:00"), Type: DenarioPrice},
+		{Key: "goldcoins", Value: 46.30234, Time: denarioTime(t, "2026-09-18T04:34:29+02:00"), Type: DenarioReserve},
 	}
 	got := sentDenarioQuotes(t, scraper)
 	if len(got) != len(want) {
 		t.Errorf("sent %d quotes, want %d: %+v", len(got), len(want), got)
 	}
 	for _, quote := range want {
-		if got[quote.Key] != quote {
+		if !got[quote.Key].Time.Equal(quote.Time) {
+			t.Errorf("%s time = %v, want %v", quote.Key, got[quote.Key].Time, quote.Time)
+		}
+		if got[quote.Key].Value != quote.Value || got[quote.Key].Type != quote.Type {
 			t.Errorf("sent %+v, want %+v", got[quote.Key], quote)
 		}
+	}
+}
+
+// The API reports when it priced the asset, so a backend that stopped updating
+// can be kept off the oracle.
+func TestDenarioSkipsStaleValues(t *testing.T) {
+	fresh := time.Now().Add(-time.Minute)
+	stale := time.Now().Add(-2 * time.Hour)
+	server := fakeDenarioAPI(t, map[string]string{
+		"/price/goldcoin/latest/CHF": `{"priceAsk":"3796.19812","priceDate":"` + fresh.Format(time.RFC3339) + `"}`,
+		"/price/goldcoin/latest/USD": `{"priceAsk":"4612.03927","priceDate":"` + stale.Format(time.RFC3339) + `"}`,
+	})
+	scraper := testDenarioScraper(server, testDenarioAuthKey,
+		[]string{"goldcoin/latest/CHF", "goldcoin/latest/USD"}, nil)
+	scraper.maxValueAge = 30 * time.Minute
+
+	if err := scraper.UpdateValues(); err != nil {
+		t.Fatalf("UpdateValues: %v", err)
+	}
+
+	got := sentDenarioQuotes(t, scraper)
+	if _, sent := got["goldcoin/latest/USD"]; sent {
+		t.Error("a 2h old price was sent although maxValueAge is 30m")
+	}
+	if _, sent := got["goldcoin/latest/CHF"]; !sent {
+		t.Error("the fresh price was not sent")
+	}
+}
+
+// Age limit off (the default): old values still go to the oracle.
+func TestDenarioKeepsOldValuesWithoutAgeLimit(t *testing.T) {
+	server := fakeDenarioAPI(t, map[string]string{
+		"/price/goldcoin/latest/CHF": `{"priceAsk":"3796.19812","priceDate":"2020-01-01T00:00:00+02:00"}`,
+		// No timestamp at all, e.g. if the API changes shape.
+		"/reserve/goldcoins": `{"amountOunces":"46.30234"}`,
+	})
+	scraper := testDenarioScraper(server, testDenarioAuthKey,
+		[]string{"goldcoin/latest/CHF"}, []string{"goldcoins"})
+
+	if err := scraper.UpdateValues(); err != nil {
+		t.Fatalf("UpdateValues: %v", err)
+	}
+
+	got := sentDenarioQuotes(t, scraper)
+	if len(got) != 2 {
+		t.Errorf("sent %d quotes, want 2: %+v", len(got), got)
+	}
+	if !got["goldcoins"].Time.IsZero() {
+		t.Errorf("missing timestamp became %v, want zero", got["goldcoins"].Time)
 	}
 }
 
@@ -160,6 +221,13 @@ func TestDenarioConfigFile(t *testing.T) {
 	if len(c.Reserves) == 0 {
 		t.Error("no Reserves configured")
 	}
+
+	// The price route is <coin>/latest/<currency>, a short path answers 404.
+	for _, asset := range c.Prices {
+		if strings.Count(asset, "/") != 2 || !strings.Contains(asset, "/latest/") {
+			t.Errorf("price asset %q is not a <coin>/latest/<currency> path", asset)
+		}
+	}
 }
 
 // Checks the configured assets against the real API. Requires a Denario API token:
@@ -178,19 +246,19 @@ func TestDenarioLiveAPI(t *testing.T) {
 	}
 
 	for _, asset := range c.Prices {
-		value, err := scraper.getValue(DENARIO_PRICE_URL+"/"+asset, DENARIO_PRICE_FIELD)
+		value, valueTime, err := scraper.getValue(DENARIO_PRICE_URL+"/"+asset, DENARIO_PRICE_FIELD, DENARIO_PRICE_TIME_FIELD)
 		if err != nil {
 			t.Errorf("price %s: %v", asset, err)
 			continue
 		}
-		t.Logf("price %s = %v", asset, value)
+		t.Logf("price %s = %v (%s, %v old)", asset, value, valueTime.Format(time.RFC3339), time.Since(valueTime).Truncate(time.Second))
 	}
 	for _, asset := range c.Reserves {
-		value, err := scraper.getValue(DENARIO_RESERVE_URL+"/"+asset, DENARIO_RESERVE_FIELD)
+		value, valueTime, err := scraper.getValue(DENARIO_RESERVE_URL+"/"+asset, DENARIO_RESERVE_FIELD, DENARIO_RESERVE_TIME_FIELD)
 		if err != nil {
 			t.Errorf("reserve %s: %v", asset, err)
 			continue
 		}
-		t.Logf("reserve %s = %v", asset, value)
+		t.Logf("reserve %s = %v (%s, %v old)", asset, value, valueTime.Format(time.RFC3339), time.Since(valueTime).Truncate(time.Second))
 	}
 }
