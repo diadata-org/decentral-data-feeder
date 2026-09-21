@@ -77,7 +77,7 @@ func NewDenarioScraper() *DenarioScraper {
 		httpClient:         &http.Client{Timeout: denarioRequestTimeout},
 		updateTicker:       time.NewTicker(time.Duration(updateSecs) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
-		branchMarketConfig: utils.Getenv("DENARIO_BRANCH_MARKET_CONFIG", ""),
+		branchMarketConfig: utils.Getenv("DENARIO_BRANCH_MARKET_CONFIG", "master"),
 		maxValueAge:        time.Duration(maxValueAgeSeconds) * time.Second,
 	}
 	scraper.dataChannel = make(chan []byte)
