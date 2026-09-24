@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/scraper"
@@ -19,7 +20,14 @@ var (
 	values                []*big.Int
 	isFirstRun            = true
 	batchSizeOracleUpdate int
+	lastPublished         = make(map[string]publishedValue)
+	pending               = make(map[string]publishedValue)
 )
+
+type publishedValue struct {
+	value      *big.Int
+	sourceTime time.Time
+}
 
 func init() {
 	log = logrus.New()
@@ -67,25 +75,22 @@ func OracleUpdateExecutor(
 
 				if twelvedataResponse.Type == scraper.NyseOpen {
 					// business time.
-					keys = append(keys, "US_Open")
 					nyseOpen := big.NewInt(0)
 					if twelvedataResponse.NYSEOpen {
 						nyseOpen = utils.ScaleInt(1, decimalsOracleValue)
 					}
-					values = append(values, nyseOpen)
+					collect("US_Open", nyseOpen, time.Time{})
 
 					// holiday.
-					keys = append(keys, "US_Holiday")
 					nyseHoliday := big.NewInt(0)
 					if twelvedataResponse.NYSEHoliday {
 						nyseHoliday = utils.ScaleInt(1, decimalsOracleValue)
 					}
-					values = append(values, nyseHoliday)
+					collect("US_Holiday", nyseHoliday, time.Time{})
 				} else {
 					log.Info("got rwa data: ", twelvedataResponse)
 					if twelvedataResponse.Price > 0 {
-						keys = append(keys, twelvedataResponse.Symbol)
-						values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
+						collect(twelvedataResponse.Symbol, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue), twelvedataResponse.Time)
 					}
 				}
 
@@ -98,8 +103,11 @@ func OracleUpdateExecutor(
 				}
 				log.Infof("got xlsd quote %s -- %v", xlsdQuote.Symbol, xlsdQuote.FairPrice)
 				if xlsdQuote.FairPrice > 0 {
-					keys = append(keys, xlsdQuote.Symbol)
-					values = append(values, utils.ScaleFloat(xlsdQuote.FairPrice, decimalsOracleValue))
+					var sourceTime time.Time
+					if xlsdQuote.Timestamp > 0 {
+						sourceTime = time.UnixMilli(xlsdQuote.Timestamp)
+					}
+					collect(xlsdQuote.Symbol, utils.ScaleFloat(xlsdQuote.FairPrice, decimalsOracleValue), sourceTime)
 				}
 
 			case scraper.DENARIO:
@@ -111,8 +119,7 @@ func OracleUpdateExecutor(
 				}
 				log.Infof("got denario %s %s -- %v -- %s", denarioQuote.Type, denarioQuote.Key, denarioQuote.Value, denarioQuote.Time.Format(time.RFC3339))
 				if denarioQuote.Value > 0 {
-					keys = append(keys, denarioQuote.Key)
-					values = append(values, utils.ScaleFloat(denarioQuote.Value, decimalsOracleValue))
+					collect(denarioQuote.Key, utils.ScaleFloat(denarioQuote.Value, decimalsOracleValue), denarioQuote.Time)
 				}
 
 			case scraper.BELO:
@@ -125,8 +132,7 @@ func OracleUpdateExecutor(
 				}
 				log.Infof("got belo quote %s -- %v", beloQuote.PairCode, beloQuote.Bid)
 				if beloQuote.Bid > 0 {
-					keys = append(keys, beloQuote.PairCode)
-					values = append(values, utils.ScaleFloat(beloQuote.Bid, decimalsOracleValue))
+					collect(beloQuote.PairCode, utils.ScaleFloat(beloQuote.Bid, decimalsOracleValue), time.Time{})
 				}
 
 			case scraper.PARTICULA:
@@ -139,12 +145,20 @@ func OracleUpdateExecutor(
 
 				log.Info("got particula token rating data: ", tokenRating)
 				for key, value := range tokenRating {
-					keys = append(keys, key)
-					values = append(values, utils.ScaleInt(value, decimalsOracleValue))
+					var sourceTime time.Time
+					if lastRatedAt, ok := tokenRating[key[:strings.LastIndex(key, ":")]+":LastRatedAt"]; ok {
+						sourceTime = time.Unix(lastRatedAt, 0)
+					}
+					collect(key, utils.ScaleInt(value, decimalsOracleValue), sourceTime)
 				}
 			}
 
 		case <-updateDoneChannel:
+
+			if len(keys) == 0 {
+				log.Info("OracleUpdateExecutor - no new values. Skip oracle update.")
+				continue
+			}
 
 			// update oracle with collected keys and values.
 			log.Infof("OracleUpdateExecutor collected %v responses. make oracle update...", len(values))
@@ -154,6 +168,10 @@ func OracleUpdateExecutor(
 				err := updateOracleMultiValues(contract, auth, keys, values, time.Now().Unix(), isFirstRun)
 				if err != nil {
 					log.Errorf("updater - Failed to update Oracle: %v.", err)
+				} else {
+					for key, pv := range pending {
+						lastPublished[key] = pv
+					}
 				}
 
 			default:
@@ -163,9 +181,28 @@ func OracleUpdateExecutor(
 			// reset keys and values for next update.
 			keys = []string{}
 			values = []*big.Int{}
+			pending = make(map[string]publishedValue)
 			isFirstRun = false // Mark first run as complete
 		}
 	}
+}
+
+// collect adds key to the next oracle update only if its value changed and its source time,
+// if given, is not older than the last published one.
+func collect(key string, value *big.Int, sourceTime time.Time) {
+	if last, ok := lastPublished[key]; ok {
+		if value.Cmp(last.value) == 0 {
+			log.Infof("skip %s: value unchanged", key)
+			return
+		}
+		if !sourceTime.IsZero() && sourceTime.Before(last.sourceTime) {
+			log.Infof("skip %s: source time %s older than last published %s", key, sourceTime.Format(time.RFC3339), last.sourceTime.Format(time.RFC3339))
+			return
+		}
+	}
+	keys = append(keys, key)
+	values = append(values, value)
+	pending[key] = publishedValue{value: value, sourceTime: sourceTime}
 }
 
 func updateOracleMultiValues(
