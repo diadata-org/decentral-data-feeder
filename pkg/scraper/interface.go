@@ -21,6 +21,8 @@ func NewDataScraper(source string) DataScraper {
 		return NewParticulaScraper()
 	case XLSD:
 		return NewXLSDScraper()
+	case DENARIO:
+		return NewDenarioScraper()
 
 	default:
 		return nil
