@@ -30,23 +30,24 @@ func TestCollect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			keys, values = nil, nil
-			pending = make(map[string]publishedValue)
-			lastPublished = make(map[string]publishedValue)
+			state := updaterState{
+				lastPublished: make(map[string]publishedValue),
+				pending:       make(map[string]publishedValue),
+			}
 			if tt.last != nil {
-				lastPublished["k"] = *tt.last
+				state.lastPublished["k"] = *tt.last
 			}
 
-			collect("k", big.NewInt(tt.value), tt.sourceTime)
+			collect(&state, "k", big.NewInt(tt.value), tt.sourceTime)
 
-			if got := len(keys) == 1; got != tt.want {
+			if got := len(state.keys) == 1; got != tt.want {
 				t.Fatalf("collected = %v, want %v", got, tt.want)
 			}
-			if _, got := pending["k"]; got != tt.want {
+			if _, got := state.pending["k"]; got != tt.want {
 				t.Fatalf("pending = %v, want %v", got, tt.want)
 			}
-			if tt.want && (values[0].Int64() != tt.value || !pending["k"].sourceTime.Equal(tt.sourceTime)) {
-				t.Fatalf("got value %v time %v, want %v %v", values[0], pending["k"].sourceTime, tt.value, tt.sourceTime)
+			if tt.want && (state.values[0].Int64() != tt.value || !state.pending["k"].sourceTime.Equal(tt.sourceTime)) {
+				t.Fatalf("got value %v time %v, want %v %v", state.values[0], state.pending["k"].sourceTime, tt.value, tt.sourceTime)
 			}
 		})
 	}
