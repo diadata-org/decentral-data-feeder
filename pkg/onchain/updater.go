@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"math/big"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/diadata-org/decentral-data-feeder/pkg/scraper"
@@ -15,11 +17,37 @@ import (
 )
 
 var (
-	keys                  []string
-	values                []*big.Int
-	isFirstRun            = true
 	batchSizeOracleUpdate int
+
+	txWorkerOnce sync.Once
+	txWorkerCh   chan txWriteRequest
 )
+
+type publishedValue struct {
+	value      *big.Int
+	sourceTime time.Time
+}
+
+type txWriteRequest struct {
+	contract diaoraclev3.DIAOracleV3
+	opts     *bind.TransactOpts
+	keys     []string
+	values   []*big.Int
+	resultCh chan txWriteResult
+}
+
+type txWriteResult struct {
+	tx  *types.Transaction
+	err error
+}
+
+type updaterState struct {
+	keys          []string
+	values        []*big.Int
+	isFirstRun    bool
+	lastPublished map[string]publishedValue
+	pending       map[string]publishedValue
+}
 
 func init() {
 	log = logrus.New()
@@ -50,6 +78,11 @@ func OracleUpdateExecutor(
 	dataChannel <-chan []byte,
 	updateDoneChannel <-chan bool,
 ) {
+	state := updaterState{
+		isFirstRun:    true,
+		lastPublished: make(map[string]publishedValue),
+		pending:       make(map[string]publishedValue),
+	}
 
 	for {
 
@@ -67,25 +100,22 @@ func OracleUpdateExecutor(
 
 				if twelvedataResponse.Type == scraper.NyseOpen {
 					// business time.
-					keys = append(keys, "US_Open")
 					nyseOpen := big.NewInt(0)
 					if twelvedataResponse.NYSEOpen {
 						nyseOpen = utils.ScaleInt(1, decimalsOracleValue)
 					}
-					values = append(values, nyseOpen)
+					collect(&state, "US_Open", nyseOpen, time.Time{})
 
 					// holiday.
-					keys = append(keys, "US_Holiday")
 					nyseHoliday := big.NewInt(0)
 					if twelvedataResponse.NYSEHoliday {
 						nyseHoliday = utils.ScaleInt(1, decimalsOracleValue)
 					}
-					values = append(values, nyseHoliday)
+					collect(&state, "US_Holiday", nyseHoliday, time.Time{})
 				} else {
 					log.Info("got rwa data: ", twelvedataResponse)
 					if twelvedataResponse.Price > 0 {
-						keys = append(keys, twelvedataResponse.Symbol)
-						values = append(values, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue))
+						collect(&state, twelvedataResponse.Symbol, utils.ScaleFloat(twelvedataResponse.Price, decimalsOracleValue), twelvedataResponse.Time)
 					}
 				}
 
@@ -98,8 +128,23 @@ func OracleUpdateExecutor(
 				}
 				log.Infof("got xlsd quote %s -- %v", xlsdQuote.Symbol, xlsdQuote.FairPrice)
 				if xlsdQuote.FairPrice > 0 {
-					keys = append(keys, xlsdQuote.Symbol)
-					values = append(values, utils.ScaleFloat(xlsdQuote.FairPrice, decimalsOracleValue))
+					var sourceTime time.Time
+					if xlsdQuote.Timestamp > 0 {
+						sourceTime = time.UnixMilli(xlsdQuote.Timestamp)
+					}
+					collect(&state, xlsdQuote.Symbol, utils.ScaleFloat(xlsdQuote.FairPrice, decimalsOracleValue), sourceTime)
+				}
+
+			case scraper.DENARIO:
+				var denarioQuote scraper.DenarioQuote
+				err := json.Unmarshal(data, &denarioQuote)
+				if err != nil {
+					log.Error("Unmarshal denario response: ", err)
+					continue
+				}
+				log.Infof("got denario %s %s -- %v -- %s", denarioQuote.Type, denarioQuote.Key, denarioQuote.Value, denarioQuote.Time.Format(time.RFC3339))
+				if denarioQuote.Value > 0 {
+					collect(&state, denarioQuote.Key, utils.ScaleFloat(denarioQuote.Value, decimalsOracleValue), denarioQuote.Time)
 				}
 
 			case scraper.BELO:
@@ -112,8 +157,7 @@ func OracleUpdateExecutor(
 				}
 				log.Infof("got belo quote %s -- %v", beloQuote.PairCode, beloQuote.Bid)
 				if beloQuote.Bid > 0 {
-					keys = append(keys, beloQuote.PairCode)
-					values = append(values, utils.ScaleFloat(beloQuote.Bid, decimalsOracleValue))
+					collect(&state, beloQuote.PairCode, utils.ScaleFloat(beloQuote.Bid, decimalsOracleValue), time.Time{})
 				}
 
 			case scraper.PARTICULA:
@@ -126,21 +170,33 @@ func OracleUpdateExecutor(
 
 				log.Info("got particula token rating data: ", tokenRating)
 				for key, value := range tokenRating {
-					keys = append(keys, key)
-					values = append(values, utils.ScaleInt(value, decimalsOracleValue))
+					var sourceTime time.Time
+					if lastRatedAt, ok := tokenRating[key[:strings.LastIndex(key, ":")]+":LastRatedAt"]; ok {
+						sourceTime = time.Unix(lastRatedAt, 0)
+					}
+					collect(&state, key, utils.ScaleInt(value, decimalsOracleValue), sourceTime)
 				}
 			}
 
 		case <-updateDoneChannel:
 
+			if len(state.keys) == 0 {
+				log.Info("OracleUpdateExecutor - no new values. Skip oracle update.")
+				continue
+			}
+
 			// update oracle with collected keys and values.
-			log.Infof("OracleUpdateExecutor collected %v responses. make oracle update...", len(values))
+			log.Infof("OracleUpdateExecutor collected %v responses. make oracle update...", len(state.values))
 
 			switch contract := contractAny.(type) {
 			case diaoraclev3.DIAOracleV3:
-				err := updateOracleMultiValues(contract, auth, keys, values, time.Now().Unix(), isFirstRun)
+				err := updateOracleMultiValues(contract, auth, state.keys, state.values, time.Now().Unix(), state.isFirstRun)
 				if err != nil {
 					log.Errorf("updater - Failed to update Oracle: %v.", err)
+				} else {
+					for key, pv := range state.pending {
+						state.lastPublished[key] = pv
+					}
 				}
 
 			default:
@@ -148,11 +204,30 @@ func OracleUpdateExecutor(
 			}
 
 			// reset keys and values for next update.
-			keys = []string{}
-			values = []*big.Int{}
-			isFirstRun = false // Mark first run as complete
+			state.keys = []string{}
+			state.values = []*big.Int{}
+			state.pending = make(map[string]publishedValue)
+			state.isFirstRun = false // Mark first run as complete
 		}
 	}
+}
+
+// collect adds key to the next oracle update only if its value changed and its source time,
+// if given, is not older than the last published one.
+func collect(state *updaterState, key string, value *big.Int, sourceTime time.Time) {
+	if last, ok := state.lastPublished[key]; ok {
+		if value.Cmp(last.value) == 0 {
+			log.Infof("skip %s: value unchanged", key)
+			return
+		}
+		if !sourceTime.IsZero() && sourceTime.Before(last.sourceTime) {
+			log.Infof("skip %s: source time %s older than last published %s", key, sourceTime.Format(time.RFC3339), last.sourceTime.Format(time.RFC3339))
+			return
+		}
+	}
+	state.keys = append(state.keys, key)
+	state.values = append(state.values, value)
+	state.pending[key] = publishedValue{value: value, sourceTime: sourceTime}
 }
 
 func updateOracleMultiValues(
@@ -193,12 +268,8 @@ func updateOracleMultiValues(
 
 			log.Infof("updater - Processing batch %d: items %d to %d", (i/batchSizeOracleUpdate)+1, i+1, end)
 
-			// Write values to smart contract
-			tx, err := contract.SetMultipleValues(&bind.TransactOpts{
-				From:     auth.From,
-				Signer:   auth.Signer,
-				GasPrice: gasPrice,
-			}, batchKeys, batchValues)
+			// Write values to smart contract through single tx worker
+			tx, err := enqueueSetMultipleValues(contract, auth, batchKeys, batchValues, gasPrice)
 			if err != nil {
 				log.Errorf("updater - Failed to update batch %d: %v", (i/batchSizeOracleUpdate)+1, err)
 				return err
@@ -210,11 +281,7 @@ func updateOracleMultiValues(
 	} else {
 		log.Infof("updater - Subsequent run: processing all %d items in single transaction", totalItems)
 
-		tx, err := contract.SetMultipleValues(&bind.TransactOpts{
-			From:     auth.From,
-			Signer:   auth.Signer,
-			GasPrice: gasPrice,
-		}, keys, cValues)
+		tx, err := enqueueSetMultipleValues(contract, auth, keys, cValues, gasPrice)
 		if err != nil {
 			log.Errorf("updater - Failed to update oracle: %v", err)
 			return err
@@ -225,6 +292,72 @@ func updateOracleMultiValues(
 	}
 
 	return nil
+}
+
+func enqueueSetMultipleValues(
+	contract diaoraclev3.DIAOracleV3,
+	auth *bind.TransactOpts,
+	keys []string,
+	values []*big.Int,
+	gasPrice *big.Int,
+) (*types.Transaction, error) {
+	startTxWorker()
+
+	resultCh := make(chan txWriteResult, 1)
+
+	keysCopy := append([]string(nil), keys...)
+	valuesCopy := make([]*big.Int, 0, len(values))
+	for _, v := range values {
+		if v == nil {
+			valuesCopy = append(valuesCopy, nil)
+			continue
+		}
+		valuesCopy = append(valuesCopy, new(big.Int).Set(v))
+	}
+
+	txWorkerCh <- txWriteRequest{
+		contract: contract,
+		opts:     cloneTransactOpts(auth, gasPrice),
+		keys:     keysCopy,
+		values:   valuesCopy,
+		resultCh: resultCh,
+	}
+
+	result := <-resultCh
+	return result.tx, result.err
+}
+
+func startTxWorker() {
+	txWorkerOnce.Do(func() {
+		txWorkerCh = make(chan txWriteRequest, 256)
+
+		go func() {
+			for req := range txWorkerCh {
+				tx, err := req.contract.SetMultipleValues(req.opts, req.keys, req.values)
+				req.resultCh <- txWriteResult{tx: tx, err: err}
+				close(req.resultCh)
+			}
+		}()
+	})
+}
+
+func cloneTransactOpts(auth *bind.TransactOpts, gasPrice *big.Int) *bind.TransactOpts {
+	if auth == nil {
+		return &bind.TransactOpts{GasPrice: gasPrice}
+	}
+
+	return &bind.TransactOpts{
+		From:      auth.From,
+		Nonce:     auth.Nonce,
+		Signer:    auth.Signer,
+		Value:     auth.Value,
+		GasPrice:  gasPrice,
+		GasFeeCap: auth.GasFeeCap,
+		GasTipCap: auth.GasTipCap,
+		GasLimit:  auth.GasLimit,
+		Context:   auth.Context,
+		NoSend:    auth.NoSend,
+	}
 }
 
 func logTx(tx *types.Transaction) {
