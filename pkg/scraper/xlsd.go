@@ -39,6 +39,7 @@ type XLSDScraper struct {
 	dataChannel        chan []byte
 	updateDoneChannel  chan bool
 	pairSeparator      string
+	dataFreshness      time.Duration
 }
 
 func NewXLSDScraper() *XLSDScraper {
@@ -52,12 +53,18 @@ func NewXLSDScraper() *XLSDScraper {
 		log.Errorf("parse XLSD_CONFIG_UPDATE_SECONDS: %v", err)
 		configUpdateSeconds = 86400
 	}
+	dataFreshnessSeconds, err := strconv.Atoi(utils.Getenv("XLSD_DATA_FRESHNESS_SECONDS", "60"))
+	if err != nil {
+		log.Errorf("parse XLSD_DATA_FRESHNESS_SECONDS: %v", err)
+		dataFreshnessSeconds = 60
+	}
 
 	scraper := &XLSDScraper{
 		updateTicker:       time.NewTicker(time.Duration(updateSecs) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
 		branchMarketConfig: utils.Getenv("XLSD_BRANCH_MARKET_CONFIG", ""),
 		pairSeparator:      "/",
+		dataFreshness:      time.Duration(dataFreshnessSeconds) * time.Second,
 	}
 	scraper.dataChannel = make(chan []byte)
 	scraper.updateDoneChannel = make(chan bool)
@@ -110,6 +117,11 @@ func (scraper *XLSDScraper) UpdatePrices(url string) error {
 	tokens := scraper.restrictToConfigTokens(allTokens)
 
 	for _, token := range tokens {
+		fresh, over := utils.CheckFreshness(time.UnixMilli(token.Timestamp), scraper.dataFreshness)
+		if !fresh {
+			log.Warnf("token %s timestamp is %v too old", token.Symbol, over)
+			continue
+		}
 
 		b, err := json.Marshal(token)
 		if err != nil {

@@ -31,6 +31,11 @@ type XLSDConfig struct {
 	Tokens []string `json:"Tokens"`
 }
 
+type DenarioConfig struct {
+	Prices   []string `json:"Prices"`
+	Reserves []string `json:"Reserves"`
+}
+
 func GetRWAConfig(filename string, branch string) (c RWAConfig, err error) {
 
 	data, err := utils.ReadFile(filename, branch)
@@ -62,6 +67,18 @@ func GetBeloConfig(filename string, branch string) (c BeloConfig, err error) {
 }
 
 func GetXLSDConfig(filename string, branch string) (c XLSDConfig, err error) {
+
+	data, err := utils.ReadFile(filename, branch)
+	if err != nil {
+		return
+	}
+
+	err = json.Unmarshal(data, &c)
+	return
+
+}
+
+func GetDenarioConfig(filename string, branch string) (c DenarioConfig, err error) {
 
 	data, err := utils.ReadFile(filename, branch)
 	if err != nil {
