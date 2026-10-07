@@ -85,10 +85,10 @@ func NewTwelvedataScraper() *TwelvedataScraper {
 		log.Errorf("parse TWELVEDATA_CONFIG_UPDATE_SECONDS: %v", err)
 		configUpdateSeconds = 86400
 	}
-	dataFreshnessSeconds, err := strconv.Atoi(utils.Getenv("TWELVEDATA_DATA_FRESHNESS_SECONDS", "160"))
+	dataFreshnessSeconds, err := strconv.Atoi(utils.Getenv("TWELVEDATA_DATA_FRESHNESS_SECONDS", "300"))
 	if err != nil {
 		log.Errorf("parse TWELVEDATA_DATA_FRESHNESS_SECONDS: %v", err)
-		dataFreshnessSeconds = 160
+		dataFreshnessSeconds = 300
 	}
 
 	s := &TwelvedataScraper{
