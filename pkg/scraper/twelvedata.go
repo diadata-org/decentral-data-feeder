@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	twelvedataApiBaseString = utils.Getenv("TWELVEDATA_API_BASE_URL", "https://api.twelvedata.com/")
+	twelvedataApiBaseString = utils.Getenv("TWELVEDATA_API_BASE_URL", "https://api.twelvedata.com")
 	diadataApiBaseString    = "https://api.diadata.org/v1/"
 )
 
@@ -373,7 +373,7 @@ func (scraper *TwelvedataScraper) getTwelveFXData(symbol string) (fxRate twelved
 		symbol = symbols[0] + TWELVEDATA_TICKER_SEPARATOR + symbols[1]
 	}
 
-	apiURL := twelvedataApiBaseString + "exchange_rate?symbol=" + symbol + "&apikey=" + scraper.apiKey
+	apiURL := twelvedataApiBaseString + "/exchange_rate?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {
 		return
@@ -386,7 +386,7 @@ func (scraper *TwelvedataScraper) getTwelveFXData(symbol string) (fxRate twelved
 func (scraper *TwelvedataScraper) getTwelveStockPrice(symbol string) (stockPrice twelvedataAPIStockResponse, err error) {
 	var response []byte
 
-	apiURL := twelvedataApiBaseString + "price?symbol=" + symbol + "&apikey=" + scraper.apiKey
+	apiURL := twelvedataApiBaseString + "/price?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {
 		return
@@ -406,9 +406,9 @@ func (scraper *TwelvedataScraper) getTwelveQuote(symbol string, comm bool) (comm
 
 	var apiURL string
 	if comm {
-		apiURL = twelvedataApiBaseString + "quote?symbol=" + symbol + "&exchange=commodity" + "&apikey=" + scraper.apiKey
+		apiURL = twelvedataApiBaseString + "/quote?symbol=" + symbol + "&exchange=commodity" + "&apikey=" + scraper.apiKey
 	} else {
-		apiURL = twelvedataApiBaseString + "quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
+		apiURL = twelvedataApiBaseString + "/quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	}
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {

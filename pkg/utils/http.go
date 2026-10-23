@@ -1,9 +1,11 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -16,6 +18,7 @@ func GetRequestAuth(url string, accessToken string) (data []byte, statusCode int
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		err = sanitizeURLError(err)
 		return
 	}
 	defer resp.Body.Close()
@@ -36,8 +39,7 @@ func GetRequest(url string) ([]byte, int, error) {
 
 	response, err := http.Get(url) //nolint:noctx,gosec
 	if err != nil {
-		log.Error("get request: ", err)
-		return []byte{}, 0, err
+		return []byte{}, 0, sanitizeURLError(err)
 	}
 
 	// Close response body after function
@@ -62,4 +64,23 @@ func GetRequest(url string) ([]byte, int, error) {
 	}
 
 	return XMLdata, response.StatusCode, err
+}
+
+func sanitizeURLError(err error) error {
+	var ue *neturl.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+
+	sanitizedURL := ue.URL
+	if u, perr := neturl.Parse(ue.URL); perr == nil {
+		u.RawQuery = ""
+		sanitizedURL = u.String()
+	}
+
+	return &neturl.Error{
+		Op:  ue.Op,
+		URL: sanitizedURL,
+		Err: ue.Err,
+	}
 }
