@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	twelvedataApiBaseString = "https://api.twelvedata.com/"
+	twelvedataApiBaseString = utils.Getenv("TWELVEDATA_API_BASE_URL", "https://api.twelvedata.com/")
 	diadataApiBaseString    = "https://api.diadata.org/v1/"
 )
 

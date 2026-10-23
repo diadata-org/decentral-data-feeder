@@ -17,8 +17,6 @@ import (
 
 // API Configuration
 const (
-	PARTICULA_BASE_URL          = "https://api.particula.io"
-	PARTICULA_AUTH_URL          = PARTICULA_BASE_URL + "/oauth/token"
 	PARTICULA_PRECISION         = 1e8
 	PARTICULA_API_ACCESS_BUFFER = 300
 )
@@ -60,6 +58,8 @@ type ParticulaScraper struct {
 	updateDoneChannel    chan bool
 	ticker               *time.Ticker
 	apiClientID          string
+	baseURL              string
+	authURL              string
 	apiKey               string
 	accessToken          string
 	accessTokenTimestamp time.Time
@@ -78,6 +78,8 @@ func NewParticulaScraper() *ParticulaScraper {
 
 	scraper := &ParticulaScraper{
 		ticker:      time.NewTicker(time.Duration(particulaUpdateSeconds) * time.Second),
+		baseURL:     utils.Getenv("PARTICULA_BASE_URL", "https://api.particula.io"),
+		authURL:     utils.Getenv("PARTICULA_AUTH_URL", "https://api.particula.io/oauth/token"),
 		apiClientID: utils.Getenv("PARTICULA_API_CLIENT_ID", ""),
 		apiKey:      utils.Getenv("PARTICULA_API_KEY", ""),
 	}
@@ -131,7 +133,7 @@ func (scraper *ParticulaScraper) UpdateRatings() error {
 	log.Info("Authentication successful!")
 	log.Info("Fetching issuers...")
 
-	issuerResponse, err := listIssuers(scraper.accessToken)
+	issuerResponse, err := scraper.listIssuers()
 	if err != nil || len(issuerResponse) == 0 {
 		log.Info("Failed to retrieve issuers or no issuers found:", err)
 		return err
@@ -150,7 +152,7 @@ func (scraper *ParticulaScraper) UpdateRatings() error {
 
 		log.Infof("Fetching tokens for issuer  with ID %s", issuer.ID)
 
-		tokens, err := getIssuerToken(issuer.ID, scraper.accessToken)
+		tokens, err := scraper.getIssuerToken(issuer.ID)
 		if err != nil || len(tokens) == 0 {
 			return fmt.Errorf("Failed to retrieve issuer tokens or no tokens found: %v", err)
 		}
@@ -160,7 +162,7 @@ func (scraper *ParticulaScraper) UpdateRatings() error {
 		for i, token := range tokens {
 			log.Infof("token %d :: name -- symbol -- image -- id: %s -- %s -- %s -- %s", i, token.Name, token.Symbol, token.Image, token.ID)
 
-			rating, err := getTokenRatings(token.ID, scraper.accessToken)
+			rating, err := scraper.getTokenRatings(token.ID)
 			if err != nil {
 				return err
 			}
@@ -201,7 +203,7 @@ func (scraper *ParticulaScraper) getAccessToken(clientID, clientSecret string) e
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 	}
-	req, err := http.NewRequest("POST", PARTICULA_AUTH_URL, bytes.NewBufferString(data.Encode()))
+	req, err := http.NewRequest("POST", scraper.authURL, bytes.NewBufferString(data.Encode()))
 	if err != nil {
 		return err
 	}
@@ -230,9 +232,9 @@ func (scraper *ParticulaScraper) getAccessToken(clientID, clientSecret string) e
 
 }
 
-func listIssuers(accessToken string) (issuers particulaIssuersResponse, err error) {
-	issuersURL := PARTICULA_BASE_URL + "/v1/issuer"
-	data, _, err := utils.GetRequestAuth(issuersURL, accessToken)
+func (scraper *ParticulaScraper) listIssuers() (issuers particulaIssuersResponse, err error) {
+	issuersURL := scraper.baseURL + "/v1/issuer"
+	data, _, err := utils.GetRequestAuth(issuersURL, scraper.accessToken)
 	if err != nil {
 		return
 	}
@@ -240,9 +242,9 @@ func listIssuers(accessToken string) (issuers particulaIssuersResponse, err erro
 	return
 }
 
-func getIssuerToken(issuerID, accessToken string) (issuerTokens particulaIssuersResponse, err error) {
-	issuerTokenURL := fmt.Sprintf("%s/v1/issuer/%s/token", PARTICULA_BASE_URL, issuerID)
-	data, _, err := utils.GetRequestAuth(issuerTokenURL, accessToken)
+func (scraper *ParticulaScraper) getIssuerToken(issuerID string) (issuerTokens particulaIssuersResponse, err error) {
+	issuerTokenURL := fmt.Sprintf("%s/v1/issuer/%s/token", scraper.baseURL, issuerID)
+	data, _, err := utils.GetRequestAuth(issuerTokenURL, scraper.accessToken)
 	if err != nil {
 		return
 	}
@@ -251,9 +253,9 @@ func getIssuerToken(issuerID, accessToken string) (issuerTokens particulaIssuers
 
 }
 
-func getTokenRatings(tokenID, accessToken string) (rating particulaTokenRatingResponse, err error) {
-	ratingsURL := fmt.Sprintf("%s/v1/token/%s/rating", PARTICULA_BASE_URL, tokenID)
-	data, _, err := utils.GetRequestAuth(ratingsURL, accessToken)
+func (scraper *ParticulaScraper) getTokenRatings(tokenID string) (rating particulaTokenRatingResponse, err error) {
+	ratingsURL := fmt.Sprintf("%s/v1/token/%s/rating", scraper.baseURL, tokenID)
+	data, _, err := utils.GetRequestAuth(ratingsURL, scraper.accessToken)
 	if err != nil {
 		return
 	}
