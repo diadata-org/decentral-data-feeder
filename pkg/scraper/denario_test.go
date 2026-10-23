@@ -246,7 +246,7 @@ func TestDenarioLiveAPI(t *testing.T) {
 	}
 
 	for _, asset := range c.Prices {
-		value, valueTime, err := scraper.getValue(DENARIO_PRICE_URL+"/"+asset, DENARIO_PRICE_FIELD, DENARIO_PRICE_TIME_FIELD)
+		value, valueTime, err := scraper.getValue(scraper.priceURL+"/"+asset, DENARIO_PRICE_FIELD, DENARIO_PRICE_TIME_FIELD)
 		if err != nil {
 			t.Errorf("price %s: %v", asset, err)
 			continue
@@ -254,7 +254,7 @@ func TestDenarioLiveAPI(t *testing.T) {
 		t.Logf("price %s = %v (%s, %v old)", asset, value, valueTime.Format(time.RFC3339), time.Since(valueTime).Truncate(time.Second))
 	}
 	for _, asset := range c.Reserves {
-		value, valueTime, err := scraper.getValue(DENARIO_RESERVE_URL+"/"+asset, DENARIO_RESERVE_FIELD, DENARIO_RESERVE_TIME_FIELD)
+		value, valueTime, err := scraper.getValue(scraper.reserveURL+"/"+asset, DENARIO_RESERVE_FIELD, DENARIO_RESERVE_TIME_FIELD)
 		if err != nil {
 			t.Errorf("reserve %s: %v", asset, err)
 			continue
