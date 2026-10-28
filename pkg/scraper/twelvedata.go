@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	twelvedataApiBaseString = "https://api.twelvedata.com/"
+	twelvedataApiBaseString = utils.Getenv("TWELVEDATA_API_BASE_URL", "https://api.twelvedata.com")
 	diadataApiBaseString    = "https://api.diadata.org/v1/"
 )
 
@@ -188,11 +188,13 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 				log.Debugf("quote for %s not available in diadata api. Switch to twelvdata api.", symbol)
 				quotation, err := scraper.getTwelveStockPrice(symbol)
 				if err != nil {
-					log.Error("getTwelveStockPrice: ", err)
+					log.Errorf("getTwelveStockPrice for %s: %v. Skip update", symbol, err)
+					continue
 				}
 				price, err := strconv.ParseFloat(quotation.Price, 64)
 				if err != nil {
-					log.Error("Parse Float for: ", symbol)
+					log.Errorf("parse price for %s: %v. Skip update", symbol, err)
+					continue
 				}
 				quote.Symbol = symbol
 				quote.Price = price
@@ -215,7 +217,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 			quoteBytes, err := json.Marshal(quote)
 			if err != nil {
-				log.Error("marshal stock data: ", err)
+				log.Errorf("marshal stock data for %s: %v. Skip update", quote.Symbol, err)
+				continue
 			}
 			scraper.dataChannel <- quoteBytes
 		}
@@ -258,7 +261,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
-			log.Error("marshal fx data: ", err)
+			log.Errorf("marshal fx data for %s: %v. Skip update", quote.Symbol, err)
+			continue
 		}
 
 		scraper.dataChannel <- quoteBytes
@@ -275,12 +279,14 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			log.Debugf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
 			quotation, err := scraper.getTwelveQuote(ticker, true)
 			if err != nil {
-				log.Error("getTwelveCommoditiesData: ", err)
+				log.Errorf("getTwelveCommoditiesData for %s: %v. Skip update", ticker, err)
+				continue
 			}
 
 			price, err := strconv.ParseFloat(quotation.Price, 64)
 			if err != nil {
-				log.Errorf("parse price for %s", quotation.Symbol)
+				log.Errorf("parse price for %s: %v. Skip update", quotation.Symbol, err)
+				continue
 			}
 			quote = TwelvedataQuote{
 				Symbol: ticker,
@@ -307,7 +313,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
-			log.Error("marshal commodities data: ", err)
+			log.Errorf("marshal commodities data for %s: %v. Skip update", quote.Symbol, err)
+			continue
 		}
 		scraper.dataChannel <- quoteBytes
 	}
@@ -323,12 +330,14 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 			log.Debugf("quote for %s not available in diadata api. Switch to twelvdata api.", ticker)
 			quotation, err := scraper.getTwelveQuote(ticker, false)
 			if err != nil {
-				log.Error("getTwelveETFData: ", err)
+				log.Errorf("getTwelveETFData for %s: %v. Skip update", ticker, err)
+				continue
 			}
 
 			price, err := strconv.ParseFloat(quotation.Price, 64)
 			if err != nil {
-				log.Errorf("parse price for %s", quotation.Symbol)
+				log.Errorf("parse price for %s: %v. Skip update", quotation.Symbol, err)
+				continue
 			}
 			quote = TwelvedataQuote{
 				Symbol: ticker,
@@ -355,7 +364,8 @@ func (scraper *TwelvedataScraper) UpdateQuotations() error {
 
 		quoteBytes, err := json.Marshal(quote)
 		if err != nil {
-			log.Error("marshal etf data: ", err)
+			log.Errorf("marshal etf data for %s: %v. Skip update", quote.Symbol, err)
+			continue
 		}
 		scraper.dataChannel <- quoteBytes
 	}
@@ -373,7 +383,7 @@ func (scraper *TwelvedataScraper) getTwelveFXData(symbol string) (fxRate twelved
 		symbol = symbols[0] + TWELVEDATA_TICKER_SEPARATOR + symbols[1]
 	}
 
-	apiURL := twelvedataApiBaseString + "exchange_rate?symbol=" + symbol + "&apikey=" + scraper.apiKey
+	apiURL := twelvedataApiBaseString + "/exchange_rate?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {
 		return
@@ -386,7 +396,7 @@ func (scraper *TwelvedataScraper) getTwelveFXData(symbol string) (fxRate twelved
 func (scraper *TwelvedataScraper) getTwelveStockPrice(symbol string) (stockPrice twelvedataAPIStockResponse, err error) {
 	var response []byte
 
-	apiURL := twelvedataApiBaseString + "price?symbol=" + symbol + "&apikey=" + scraper.apiKey
+	apiURL := twelvedataApiBaseString + "/price?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {
 		return
@@ -406,9 +416,9 @@ func (scraper *TwelvedataScraper) getTwelveQuote(symbol string, comm bool) (comm
 
 	var apiURL string
 	if comm {
-		apiURL = twelvedataApiBaseString + "quote?symbol=" + symbol + "&exchange=commodity" + "&apikey=" + scraper.apiKey
+		apiURL = twelvedataApiBaseString + "/quote?symbol=" + symbol + "&exchange=commodity" + "&apikey=" + scraper.apiKey
 	} else {
-		apiURL = twelvedataApiBaseString + "quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
+		apiURL = twelvedataApiBaseString + "/quote?symbol=" + symbol + "&apikey=" + scraper.apiKey
 	}
 	response, _, err = utils.GetRequest(apiURL)
 	if err != nil {

@@ -15,8 +15,6 @@ import (
 )
 
 const (
-	DENARIO_PRICE_URL   = "https://price.denario.swiss/api"
-	DENARIO_RESERVE_URL = "https://reserve.denario.swiss/api"
 	DENARIO_CONFIG_PATH = "denario.json"
 
 	DENARIO_PRICE_FIELD        = "priceAsk"
@@ -54,6 +52,7 @@ type DenarioScraper struct {
 }
 
 func NewDenarioScraper() *DenarioScraper {
+
 	updateSecs, err := strconv.ParseInt(utils.Getenv("DENARIO_UPDATE_SECONDS", "60"), 10, 64)
 	if err != nil {
 		log.Errorf("parse DENARIO_UPDATE_SECONDS: %v", err)
@@ -71,8 +70,8 @@ func NewDenarioScraper() *DenarioScraper {
 	}
 
 	scraper := &DenarioScraper{
-		priceURL:           DENARIO_PRICE_URL,
-		reserveURL:         DENARIO_RESERVE_URL,
+		priceURL:           utils.Getenv("DENARIO_PRICE_URL", "https://price.denario.swiss/api"),
+		reserveURL:         utils.Getenv("DENARIO_RESERVE_URL", "https://reserve.denario.swiss/api"),
 		authKey:            utils.Getenv("DENARIO_AUTH_KEY", ""),
 		httpClient:         &http.Client{Timeout: denarioRequestTimeout},
 		updateTicker:       time.NewTicker(time.Duration(updateSecs) * time.Second),
