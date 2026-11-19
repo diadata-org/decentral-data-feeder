@@ -21,7 +21,7 @@ func TestCollect(t *testing.T) {
 		{"value changed, newer time", &publishedValue{big.NewInt(1), t0}, 2, t0.Add(time.Second), true},
 		{"value changed, same time", &publishedValue{big.NewInt(1), t0}, 2, t0, true},
 		{"value changed, older time", &publishedValue{big.NewInt(1), t0}, 2, t0.Add(-time.Second), false},
-		{"value unchanged, newer time", &publishedValue{big.NewInt(1), t0}, 1, t0.Add(time.Minute), false},
+		{"value unchanged, newer time", &publishedValue{big.NewInt(1), t0}, 1, t0.Add(time.Minute), true},
 		{"no time, value changed", &publishedValue{big.NewInt(1), time.Time{}}, 2, time.Time{}, true},
 		{"no time, value unchanged", &publishedValue{big.NewInt(1), time.Time{}}, 1, time.Time{}, false},
 		{"no time, last had time, value changed", &publishedValue{big.NewInt(1), t0}, 2, time.Time{}, true},

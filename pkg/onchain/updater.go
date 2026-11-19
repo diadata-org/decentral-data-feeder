@@ -216,12 +216,16 @@ func OracleUpdateExecutor(
 // if given, is not older than the last published one.
 func collect(state *updaterState, key string, value *big.Int, sourceTime time.Time) {
 	if last, ok := state.lastPublished[key]; ok {
-		if value.Cmp(last.value) == 0 {
-			log.Infof("skip %s: value unchanged", key)
+		if value.Cmp(last.value) == 0 && sourceTime.Equal(last.sourceTime) {
+			log.Infof("skip %s: value and source time unchanged", key)
 			return
 		}
 		if !sourceTime.IsZero() && sourceTime.Before(last.sourceTime) {
 			log.Infof("skip %s: source time %s older than last published %s", key, sourceTime.Format(time.RFC3339), last.sourceTime.Format(time.RFC3339))
+			return
+		}
+		if value.Cmp(last.value) == 0 && (sourceTime.IsZero() || !sourceTime.After(last.sourceTime)) {
+			log.Infof("skip %s: value unchanged and no newer source time", key)
 			return
 		}
 	}
