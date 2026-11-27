@@ -63,7 +63,7 @@ type TwelvedataQuote struct {
 type TwelvedataScraper struct {
 	dataChannel        chan []byte
 	updateDoneChannel  chan bool
-	updateTicker       *time.Ticker
+	updateTicker       *utils.JitteredTicker
 	configUpdateTicker *time.Ticker
 	branchMarketConfig string
 	stockSymbols       []string
@@ -92,7 +92,7 @@ func NewTwelvedataScraper() *TwelvedataScraper {
 	}
 
 	s := &TwelvedataScraper{
-		updateTicker:       time.NewTicker(time.Duration(updateSeconds) * time.Second),
+		updateTicker:       utils.NewPollTicker(time.Duration(updateSeconds) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
 		apiKey:             utils.Getenv("TWELVEDATA_API_KEY", ""),
 		branchMarketConfig: utils.Getenv("TWELVEDATA_BRANCH_MARKET_CONFIG", ""),

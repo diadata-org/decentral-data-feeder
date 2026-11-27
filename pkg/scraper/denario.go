@@ -43,7 +43,7 @@ type DenarioScraper struct {
 	assetsMu           sync.RWMutex
 	prices             []string
 	reserves           []string
-	updateTicker       *time.Ticker
+	updateTicker       *utils.JitteredTicker
 	configUpdateTicker *time.Ticker
 	branchMarketConfig string
 	maxValueAge        time.Duration
@@ -74,7 +74,7 @@ func NewDenarioScraper() *DenarioScraper {
 		reserveURL:         utils.Getenv("DENARIO_RESERVE_URL", "https://reserve.denario.swiss/api"),
 		authKey:            utils.Getenv("DENARIO_AUTH_KEY", ""),
 		httpClient:         &http.Client{Timeout: denarioRequestTimeout},
-		updateTicker:       time.NewTicker(time.Duration(updateSecs) * time.Second),
+		updateTicker:       utils.NewPollTicker(time.Duration(updateSecs) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
 		branchMarketConfig: utils.Getenv("DENARIO_BRANCH_MARKET_CONFIG", "add-denario-scraper"),
 		maxValueAge:        time.Duration(maxValueAgeSeconds) * time.Second,

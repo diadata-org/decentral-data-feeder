@@ -56,7 +56,7 @@ type particulaTokenRatingResponse struct {
 type ParticulaScraper struct {
 	dataChannel          chan []byte
 	updateDoneChannel    chan bool
-	ticker               *time.Ticker
+	ticker               *utils.JitteredTicker
 	apiClientID          string
 	baseURL              string
 	authURL              string
@@ -77,7 +77,7 @@ func init() {
 func NewParticulaScraper() *ParticulaScraper {
 
 	scraper := &ParticulaScraper{
-		ticker:      time.NewTicker(time.Duration(particulaUpdateSeconds) * time.Second),
+		ticker:      utils.NewPollTicker(time.Duration(particulaUpdateSeconds) * time.Second),
 		baseURL:     utils.Getenv("PARTICULA_BASE_URL", "https://api.particula.io"),
 		authURL:     utils.Getenv("PARTICULA_AUTH_URL", "https://api.particula.io/oauth/token"),
 		apiClientID: utils.Getenv("PARTICULA_API_CLIENT_ID", ""),
