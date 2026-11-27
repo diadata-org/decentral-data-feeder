@@ -37,7 +37,7 @@ type BeloQuote struct {
 
 type BeloScraper struct {
 	pairs              []string
-	updateTicker       *time.Ticker
+	updateTicker       *utils.JitteredTicker
 	configUpdateTicker *time.Ticker
 	branchMarketConfig string
 	dataChannel        chan []byte
@@ -58,7 +58,7 @@ func NewBeloScraper() *BeloScraper {
 	}
 
 	scraper := &BeloScraper{
-		updateTicker:       time.NewTicker(time.Duration(updateSecs) * time.Second),
+		updateTicker:       utils.NewPollTicker(time.Duration(updateSecs) * time.Second),
 		configUpdateTicker: time.NewTicker(time.Duration(configUpdateSeconds) * time.Second),
 		branchMarketConfig: utils.Getenv("BELO_BRANCH_MARKET_CONFIG", ""),
 		pairSeparator:      "/",
